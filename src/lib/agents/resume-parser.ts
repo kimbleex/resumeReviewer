@@ -1,4 +1,4 @@
-import { invokeStructuredAgent, dumpJson } from "@/lib/agents/base";
+import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
 import { buildResumeParserPrompt } from "@/lib/agents/prompts";
 import { extractResumeSignals } from "@/lib/resume/signals";
 import {
@@ -24,7 +24,10 @@ function mergeHints(profile: ResumeProfile, hints: ResumeSignalHints): ResumePro
   });
 }
 
-export async function runResumeParser(document: ResumeDocument): Promise<ResumeProfile> {
+export async function runResumeParser(
+  document: ResumeDocument,
+  onProgress?: (event: StructuredAgentProgress) => void,
+): Promise<ResumeProfile> {
   const hints = extractResumeSignals(document.content);
 
   const profile = await invokeStructuredAgent({
@@ -32,6 +35,7 @@ export async function runResumeParser(document: ResumeDocument): Promise<ResumeP
     systemPrompt: buildResumeParserPrompt(),
     responseFormat: resumeProfileResponseFormatSchema,
     normalize: (value) => resumeProfileSchema.parse(value),
+    onProgress,
     userContent: `
 请解析这份简历，并输出完整的结构化简历画像。
 简历来源：${document.path}

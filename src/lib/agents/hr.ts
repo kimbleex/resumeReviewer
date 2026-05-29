@@ -1,4 +1,4 @@
-import { invokeStructuredAgent, dumpJson } from "@/lib/agents/base";
+import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
 import { buildHrPrompt } from "@/lib/agents/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
@@ -8,12 +8,17 @@ import {
   type ReviewerFeedback,
 } from "@/lib/review/schemas";
 
-export async function runHrReviewer(document: ResumeDocument, profile: ResumeProfile): Promise<ReviewerFeedback> {
+export async function runHrReviewer(
+  document: ResumeDocument,
+  profile: ResumeProfile,
+  onProgress?: (event: StructuredAgentProgress) => void,
+): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
     name: "hr_agent",
     systemPrompt: buildHrPrompt(),
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
+    onProgress,
     userContent: `
 请从 HR / ATS / 招聘筛选视角审阅这份简历。
 

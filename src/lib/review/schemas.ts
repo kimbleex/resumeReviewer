@@ -658,13 +658,22 @@ export const reviewRunResultSchema = z.object({
   finalReview: finalResumeReviewSchema,
 });
 
+export const reviewStageProgressPhaseSchema = z.enum([
+  "requesting_model",
+  "model_thinking",
+  "streaming_output",
+  "validating_output",
+]);
+
 export const reviewStageEventSchema = z.object({
-  kind: z.enum(["stage_started", "stage_completed", "pipeline_completed"]),
+  kind: z.enum(["stage_started", "stage_progress", "stage_completed", "pipeline_completed"]),
   stage: z.string(),
+  phase: reviewStageProgressPhaseSchema.nullable().optional().default(null),
   title: z.string(),
   message: z.string(),
   details: z.array(z.string()).default([]),
-  payload: z.record(z.string(), z.unknown()).nullable().optional().default(null),
+  snippet: z.preprocess((value) => coerceString(value), z.string()).optional().default(""),
+  payload: z.unknown().nullable().optional().default(null),
 });
 
 export const reviewStreamChunkSchema = z.discriminatedUnion("type", [
@@ -695,5 +704,6 @@ export type RevisionSuggestion = z.infer<typeof revisionSuggestionSchema>;
 export type ReviewerFeedback = z.infer<typeof reviewerFeedbackSchema>;
 export type FinalResumeReview = z.infer<typeof finalResumeReviewSchema>;
 export type ReviewRunResult = z.infer<typeof reviewRunResultSchema>;
+export type ReviewStageProgressPhase = z.infer<typeof reviewStageProgressPhaseSchema>;
 export type ReviewStageEvent = z.infer<typeof reviewStageEventSchema>;
 export type ReviewStreamChunk = z.infer<typeof reviewStreamChunkSchema>;

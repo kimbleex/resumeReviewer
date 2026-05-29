@@ -1,4 +1,4 @@
-import { invokeStructuredAgent, dumpJson } from "@/lib/agents/base";
+import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
 import { buildCareerMasterPrompt } from "@/lib/agents/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
@@ -8,12 +8,17 @@ import {
   type ReviewerFeedback,
 } from "@/lib/review/schemas";
 
-export async function runCareerMasterReviewer(document: ResumeDocument, profile: ResumeProfile): Promise<ReviewerFeedback> {
+export async function runCareerMasterReviewer(
+  document: ResumeDocument,
+  profile: ResumeProfile,
+  onProgress?: (event: StructuredAgentProgress) => void,
+): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
     name: "career_master_agent",
     systemPrompt: buildCareerMasterPrompt(),
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
+    onProgress,
     userContent: `
 请从职业定位、行业竞争力和长期叙事视角审阅这份简历。
 

@@ -1,5 +1,6 @@
 import { config as loadDotenv } from "dotenv";
 import { createOpenAI } from "@ai-sdk/openai";
+import { extractJsonMiddleware, extractReasoningMiddleware, wrapLanguageModel } from "ai";
 
 export function createLanguageModel() {
   loadDotenv({ path: ".env.dev", override: false });
@@ -21,5 +22,14 @@ export function createLanguageModel() {
     baseURL: baseUrl,
   });
 
-  return openai(model);
+  return wrapLanguageModel({
+    model: openai(model),
+    middleware: [
+      extractReasoningMiddleware({
+        tagName: "think",
+        separator: "\n",
+      }),
+      extractJsonMiddleware(),
+    ],
+  });
 }

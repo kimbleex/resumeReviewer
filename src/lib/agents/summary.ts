@@ -1,4 +1,4 @@
-import { invokeStructuredAgent, dumpJson } from "@/lib/agents/base";
+import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
 import { buildSummaryPrompt } from "@/lib/agents/prompts";
 import {
   finalResumeReviewResponseFormatSchema,
@@ -13,12 +13,14 @@ export async function runSummaryAgent(
   document: ResumeDocument,
   profile: ResumeProfile,
   reviewerFeedback: ReviewerFeedback[],
+  onProgress?: (event: StructuredAgentProgress) => void,
 ): Promise<FinalResumeReview> {
   return invokeStructuredAgent({
     name: "summary_agent",
     systemPrompt: buildSummaryPrompt(),
     responseFormat: finalResumeReviewResponseFormatSchema,
     normalize: (value) => finalResumeReviewSchema.parse(value),
+    onProgress,
     userContent: `
 请整合下面这些结构化结果，输出最终简历修改方案。
 
