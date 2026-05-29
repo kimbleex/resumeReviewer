@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runReviewPipeline } from "./pipeline";
-import type { ResumeDocument, ResumeProfile, ReviewerFeedback } from "./schemas";
+import type { ResumeDocument, ResumeProfile, ReviewStageEvent, ReviewerFeedback } from "./schemas";
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -134,4 +134,101 @@ test("runReviewPipeline runs stages in the expected order", async () => {
     { kind: "stage_completed", stage: "summary_agent" },
     { kind: "pipeline_completed", stage: "review_pipeline" },
   ]);
+});
+
+test("runReviewPipeline forwards streaming progress events from agents", async () => {
+  const events: ReviewStageEvent[] = [];
+  const resumeFile = new File(["Platform engineer"], "resume.txt", {
+    type: "text/plain",
+  });
+
+  const document: ResumeDocument = {
+    path: "upload://resume.txt",
+    fileType: "txt",
+    content: "Platform engineer",
+  };
+
+  const profile: ResumeProfile = {
+    candidateName: "Taylor",
+    personalInfo: { name: "Taylor", age: "", phone: "", email: "", location: "", links: [] },
+    headline: "Platform Engineer",
+    targetRoles: ["Platform Engineer"],
+    yearsOfExperience: "4 years",
+    coreSkills: ["TypeScript"],
+    skillGroups: [],
+    workExperiences: [],
+    projects: [],
+    educationRecords: [],
+    strengths: [],
+    risks: [],
+    missingInformation: [],
+    reasoningSummary: [],
+  };
+
+  await runReviewPipeline(
+    { resumeFile },
+    (event) => {
+      events.push(event);
+    },
+    {
+      loadResume: async () => document,
+      runResumeParser: async (_document, onProgress) => {
+        onProgress?.({
+          phase: "requesting_model",
+          message: "已向模型发送结构化请求。",
+        });
+        onProgress?.({
+          phase: "streaming_output",
+          message: "结构化字段正在增量生成。",
+          snippet: "{\"candidateName\":\"Taylor\"}",
+          payload: {
+            streamType: "partial_object",
+            partialObject: { candidateName: "Taylor" },
+          },
+        });
+        return profile;
+      },
+      reviewerAgents: [],
+      runSummary: async (_document, _profile, _feedback, onProgress) => {
+        onProgress?.({
+          phase: "validating_output",
+          message: "正在校验最终结构化结果。",
+        });
+        return {
+          overallScore: 80,
+          readyLevel: "promising",
+          executiveSummary: "Solid baseline resume.",
+          reasoningSummary: [],
+          topPriorities: [],
+          scoreBreakdown: [],
+          sectionRevisions: [],
+        };
+      },
+    },
+  );
+
+  assert.ok(
+    events.some(
+      (event) =>
+        event.kind === "stage_progress" &&
+        event.stage === "resume_parser" &&
+        event.phase === "requesting_model",
+    ),
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.kind === "stage_progress" &&
+        event.stage === "resume_parser" &&
+        event.phase === "streaming_output",
+    ),
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.kind === "stage_progress" &&
+        event.stage === "summary_agent" &&
+        event.phase === "validating_output",
+    ),
+  );
 });
