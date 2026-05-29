@@ -35,7 +35,7 @@ export async function POST(request: Request): Promise<Response> {
       } catch (error) {
         push({
           type: "error",
-          message: error instanceof Error ? error.message : "Unknown review error",
+          message: error instanceof Error ? error.message : "未知评审错误",
         });
       } finally {
         controller.close();
