@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Node / Next.js
+node_modules/
+.next/
+.next-logs/
+coverage/
+dist/
+tsconfig.tsbuildinfo
+
+# Test artifacts
+vitest.config.ts.timestamp-*
+
+# .env
+.env.dev
+.env

@@ -1,0 +1,9 @@
+.venv
+.pytest_cache
+__pycache__
+tests/
+docs/superpowers/
+main.py
+pyproject.toml
+uv.lock
+.python-version
