@@ -1,16 +1,18 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildHrPrompt } from "@/lib/agents/prompts";
+import { buildHrPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
   reviewerFeedbackSchema,
   type ResumeDocument,
   type ResumeProfile,
   type ReviewerFeedback,
+  type TargetJob,
 } from "@/lib/review/schemas";
 
 export async function runHrReviewer(
   document: ResumeDocument,
   profile: ResumeProfile,
+  targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
 ): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
@@ -21,6 +23,9 @@ export async function runHrReviewer(
     onProgress,
     userContent: `
 请从 HR / ATS / 招聘筛选视角审阅这份简历。
+
+目标岗位上下文：
+${formatTargetJobContext(targetJob)}
 
 简历信息：
 ${dumpJson(document)}

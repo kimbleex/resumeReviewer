@@ -1,5 +1,5 @@
 import { runReviewPipeline } from "@/lib/review/pipeline";
-import { reviewStreamChunkSchema, type ReviewStageEvent, type ReviewStreamChunk } from "@/lib/review/schemas";
+import { reviewStreamChunkSchema, targetJobSchema, type ReviewStageEvent, type ReviewStreamChunk } from "@/lib/review/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +12,8 @@ export async function POST(request: Request): Promise<Response> {
   const formData = await request.formData();
   const resumeFileValue = formData.get("resumeFile");
   const resumeFile = resumeFileValue instanceof File && resumeFileValue.size > 0 ? resumeFileValue : null;
+  const targetRole = String(formData.get("targetRole") ?? "").trim();
+  const targetDescription = String(formData.get("targetDescription") ?? "").trim();
 
   const encoder = new TextEncoder();
 
@@ -23,9 +25,17 @@ export async function POST(request: Request): Promise<Response> {
         if (!resumeFile) {
           throw new Error("请先上传简历文件。");
         }
+        if (!targetRole) {
+          throw new Error("请填写目标岗位名称。");
+        }
+
+        const targetJob = targetJobSchema.parse({
+          title: targetRole,
+          description: targetDescription,
+        });
 
         const result = await runReviewPipeline(
-          { resumeFile },
+          { resumeFile, targetJob },
           (event: ReviewStageEvent) => {
             push({ type: "event", event });
           },

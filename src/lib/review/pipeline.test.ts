@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runReviewPipeline } from "./pipeline";
-import type { ResumeDocument, ResumeProfile, ReviewStageEvent, ReviewerFeedback } from "./schemas";
+import type { ResumeDocument, ResumeProfile, ReviewStageEvent, ReviewerFeedback, TargetJob } from "./schemas";
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -19,6 +19,7 @@ test("runReviewPipeline runs stages in the expected order", async () => {
   const resumeFile = new File(["Backend engineer with Python and LangChain experience."], "resume.txt", {
     type: "text/plain",
   });
+  const targetJob: TargetJob = { title: "AI Backend Engineer", description: "" };
   const reviewerStarted = createDeferred<void>();
   const reviewerRelease = createDeferred<void>();
   const startedReviewers: string[] = [];
@@ -67,7 +68,7 @@ test("runReviewPipeline runs stages in the expected order", async () => {
   };
 
   const pipelinePromise = runReviewPipeline(
-    { resumeFile },
+    { resumeFile, targetJob },
     (event) => {
       events.push({ kind: event.kind, stage: event.stage });
     },
@@ -141,6 +142,7 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
   const resumeFile = new File(["Platform engineer"], "resume.txt", {
     type: "text/plain",
   });
+  const targetJob: TargetJob = { title: "Platform Engineer", description: "" };
 
   const document: ResumeDocument = {
     path: "upload://resume.txt",
@@ -166,7 +168,7 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
   };
 
   await runReviewPipeline(
-    { resumeFile },
+    { resumeFile, targetJob },
     (event) => {
       events.push(event);
     },
@@ -189,7 +191,7 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
         return profile;
       },
       reviewerAgents: [],
-      runSummary: async (_document, _profile, _feedback, onProgress) => {
+      runSummary: async (_document, _profile, _feedback, _targetJob, onProgress) => {
         onProgress?.({
           phase: "validating_output",
           message: "正在校验最终结构化结果。",
@@ -231,4 +233,84 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
         event.phase === "validating_output",
     ),
   );
+});
+
+test("runReviewPipeline forwards target job context to reviewer and summary agents", async () => {
+  const resumeFile = new File(["Agent platform engineer"], "resume.txt", {
+    type: "text/plain",
+  });
+  const targetJob: TargetJob = {
+    title: "AI Agent Platform Engineer",
+    description: "Build reliable multi-agent workflow infrastructure.",
+  };
+  const reviewerContexts: TargetJob[] = [];
+  let summaryContext: TargetJob | undefined;
+
+  const document: ResumeDocument = {
+    path: "upload://resume.txt",
+    fileType: "txt",
+    content: "Agent platform engineer",
+  };
+
+  const profile: ResumeProfile = {
+    candidateName: "Riley",
+    personalInfo: { name: "Riley", age: "", phone: "", email: "", location: "", links: [] },
+    headline: "AI Platform Engineer",
+    targetRoles: ["AI Platform Engineer"],
+    yearsOfExperience: "6 years",
+    coreSkills: ["TypeScript", "LLM"],
+    skillGroups: [],
+    workExperiences: [],
+    projects: [],
+    educationRecords: [],
+    strengths: [],
+    risks: [],
+    missingInformation: [],
+    reasoningSummary: [],
+  };
+
+  const reviewerFeedback: ReviewerFeedback = {
+    agentName: "hr_agent",
+    perspective: "HR",
+    overallScore: 84,
+    reasoningSummary: ["Compared resume against the target role."],
+    strengths: [],
+    concerns: [],
+    scoreBreakdown: [],
+    suggestions: [],
+  };
+
+  await runReviewPipeline(
+    { resumeFile, targetJob },
+    undefined,
+    {
+      loadResume: async () => document,
+      runResumeParser: async () => profile,
+      reviewerAgents: [
+        {
+          name: "hr_agent",
+          perspective: "HR",
+          run: async (_document, _profile, context) => {
+            reviewerContexts.push(context);
+            return reviewerFeedback;
+          },
+        },
+      ],
+      runSummary: async (_document, _profile, _feedback, context) => {
+        summaryContext = context;
+        return {
+          overallScore: 84,
+          readyLevel: "strong",
+          executiveSummary: "Target role alignment is clear.",
+          reasoningSummary: [],
+          topPriorities: [],
+          scoreBreakdown: [],
+          sectionRevisions: [],
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(reviewerContexts, [targetJob]);
+  assert.deepEqual(summaryContext, targetJob);
 });

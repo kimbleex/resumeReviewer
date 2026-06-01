@@ -1,5 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildSummaryPrompt } from "@/lib/agents/prompts";
+import { buildSummaryPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
 import {
   finalResumeReviewResponseFormatSchema,
   finalResumeReviewSchema,
@@ -7,12 +7,14 @@ import {
   type ResumeDocument,
   type ResumeProfile,
   type ReviewerFeedback,
+  type TargetJob,
 } from "@/lib/review/schemas";
 
 export async function runSummaryAgent(
   document: ResumeDocument,
   profile: ResumeProfile,
   reviewerFeedback: ReviewerFeedback[],
+  targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
 ): Promise<FinalResumeReview> {
   return invokeStructuredAgent({
@@ -23,6 +25,9 @@ export async function runSummaryAgent(
     onProgress,
     userContent: `
 请整合下面这些结构化结果，输出最终简历修改方案。
+
+目标岗位上下文：
+${formatTargetJobContext(targetJob)}
 
 简历信息：
 ${dumpJson(document)}

@@ -4,6 +4,7 @@ import { runHrReviewer } from "@/lib/agents/hr";
 import { runInterviewerReviewer } from "@/lib/agents/interviewer";
 import { runResumeParser } from "@/lib/agents/resume-parser";
 import { runSummaryAgent } from "@/lib/agents/summary";
+import { runRewriteAgent } from "@/lib/agents/rewrite";
 import { loadResumeSource, type ResumeSource } from "@/lib/resume/loader";
 import {
   reviewRunResultSchema,
@@ -14,6 +15,9 @@ import {
   type ReviewRunResult,
   type ReviewStageEvent,
   type ReviewerFeedback,
+  type TargetJob,
+  type ResumeRewrite,
+  targetJobSchema,
 } from "@/lib/review/schemas";
 
 export const reviewStageOrder = [
@@ -23,6 +27,7 @@ export const reviewStageOrder = [
   "interviewer_agent",
   "career_master_agent",
   "summary_agent",
+  "rewrite_agent",
 ] as const;
 
 export type ReviewStageName = (typeof reviewStageOrder)[number] | "review_pipeline";
@@ -33,6 +38,7 @@ export type ReviewerAgentExecutor = {
   run: (
     document: ResumeDocument,
     profile: ResumeProfile,
+    targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
   ) => Promise<ReviewerFeedback>;
 };
@@ -48,8 +54,17 @@ export type ReviewPipelineDependencies = {
     document: ResumeDocument,
     profile: ResumeProfile,
     reviewerFeedback: ReviewerFeedback[],
+    targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
   ) => Promise<FinalResumeReview>;
+  runRewrite: (
+    document: ResumeDocument,
+    profile: ResumeProfile,
+    reviewerFeedback: ReviewerFeedback[],
+    finalReview: FinalResumeReview,
+    targetJob?: TargetJob,
+    onProgress?: (event: StructuredAgentProgress) => void,
+  ) => Promise<ResumeRewrite>;
 };
 
 const defaultDependencies: ReviewPipelineDependencies = {
@@ -61,6 +76,7 @@ const defaultDependencies: ReviewPipelineDependencies = {
     { name: "career_master_agent", perspective: "Career Strategy", run: runCareerMasterReviewer },
   ],
   runSummary: runSummaryAgent,
+  runRewrite: runRewriteAgent,
 };
 
 export type ReviewEventHandler = (event: ReviewStageEvent) => void;
@@ -72,6 +88,7 @@ const stageTitles: Record<Exclude<ReviewStageName, "review_pipeline">, string> =
   interviewer_agent: "Interviewer Agent",
   career_master_agent: "Career Master",
   summary_agent: "Summary Agent",
+  rewrite_agent: "Rewrite Agent",
 };
 
 function emit(handler: ReviewEventHandler | undefined, event: ReviewStageEvent): void {
@@ -101,6 +118,7 @@ export async function runReviewPipeline(
   dependencies: Partial<ReviewPipelineDependencies> = {},
 ): Promise<ReviewRunResult> {
   const deps = { ...defaultDependencies, ...dependencies };
+  const targetJob = targetJobSchema.parse(input.targetJob);
 
   emit(eventHandler, {
     kind: "stage_started",
@@ -161,7 +179,7 @@ export async function runReviewPipeline(
         snippet: "",
         payload: null,
       });
-      const feedback = await reviewer.run(document, profile, (progress) => {
+      const feedback = await reviewer.run(document, profile, targetJob, (progress) => {
         emitStageProgress(eventHandler, reviewer.name, progress);
       });
       emit(eventHandler, {
@@ -188,7 +206,7 @@ export async function runReviewPipeline(
     snippet: "",
     payload: null,
   });
-  const finalReview = await deps.runSummary(document, profile, reviewerFeedback, (progress) => {
+  const finalReview = await deps.runSummary(document, profile, reviewerFeedback, targetJob, (progress) => {
     emitStageProgress(eventHandler, "summary_agent", progress);
   });
   emit(eventHandler, {
@@ -202,8 +220,34 @@ export async function runReviewPipeline(
     payload: finalReview,
   });
 
+  emit(eventHandler, {
+    kind: "stage_started",
+    stage: "rewrite_agent",
+    phase: null,
+    title: "智能改写简历",
+    message: "正在根据终审建议重构简历",
+    details: [],
+    snippet: "",
+    payload: null,
+  });
+  const rewriteResult = await deps.runRewrite(document, profile, reviewerFeedback, finalReview, targetJob, (progress) => {
+    emitStageProgress(eventHandler, "rewrite_agent", progress);
+  });
+  emit(eventHandler, {
+    kind: "stage_completed",
+    stage: "rewrite_agent",
+    phase: null,
+    title: "简历改写完成",
+    message: "已生成全新优化版简历",
+    details: [rewriteResult.explanation],
+    snippet: rewriteResult.rewrittenContent,
+    payload: rewriteResult,
+  });
+
   const result = reviewRunResultSchema.parse({
+    rewrite: rewriteResult,
     document,
+    targetJob,
     profile,
     reviewerFeedback,
     finalReview,

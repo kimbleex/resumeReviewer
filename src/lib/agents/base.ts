@@ -21,15 +21,6 @@ export function dumpJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function trimSnippet(text: string, limit = 260): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "";
-  }
-
-  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
-}
-
 function cleanStructuredText(text: string): string {
   const trimmed = text
     .trim()
@@ -121,7 +112,6 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   onProgress?: (event: StructuredAgentProgress) => void;
 }): Promise<TResult> {
   let latestPartialValue: DeepPartial<z.infer<TResponseFormat>> | undefined;
-  let latestPartialSnapshot = "";
   let accumulatedText = "";
   let hasOutputStreamed = false;
   let finishReason = "";
@@ -154,50 +144,28 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     },
   });
 
+  let hasReasoningStarted = false;
+
   const fullStreamTask = (async () => {
     for await (const part of result.fullStream) {
       switch (part.type) {
         case "reasoning-delta": {
-          const snippet = trimSnippet(part.text);
-          if (!snippet) {
-            break;
+          if (!hasReasoningStarted) {
+            hasReasoningStarted = true;
+            emitProgress({
+              phase: "model_thinking",
+              message: "模型已启动思考链条，正在深入分析并规划输出结构。",
+            });
           }
-
-          emitProgress({
-            phase: "model_thinking",
-            message: "模型正在推理并整理结构化字段。",
-            snippet,
-            payload: {
-              streamType: "reasoning",
-            },
-          });
           break;
         }
         case "text-delta": {
           accumulatedText += part.text;
-          const snippet = trimSnippet(part.text);
-
           if (!hasOutputStreamed) {
             hasOutputStreamed = true;
             emitProgress({
               phase: "streaming_output",
-              message: "模型开始输出结构化结果。",
-              snippet,
-              payload: {
-                streamType: "output_text",
-              },
-            });
-            break;
-          }
-
-          if (snippet) {
-            emitProgress({
-              phase: "streaming_output",
-              message: "模型正在持续输出结构化结果。",
-              snippet,
-              payload: {
-                streamType: "output_text",
-              },
+              message: "模型思考已完成，开始生成结构化诊断报告信息体。",
             });
           }
           break;
@@ -219,22 +187,6 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   const partialStreamTask = (async () => {
     for await (const partial of result.partialOutputStream) {
       latestPartialValue = partial as DeepPartial<z.infer<TResponseFormat>>;
-
-      const snapshot = JSON.stringify(partial);
-      if (!snapshot || snapshot === latestPartialSnapshot) {
-        continue;
-      }
-
-      latestPartialSnapshot = snapshot;
-      emitProgress({
-        phase: "streaming_output",
-        message: "结构化字段正在增量生成。",
-        snippet: trimSnippet(snapshot),
-        payload: {
-          streamType: "partial_object",
-          partialObject: partial,
-        },
-      });
     }
   })();
 

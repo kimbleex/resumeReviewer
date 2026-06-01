@@ -418,6 +418,11 @@ export const resumeDocumentSchema = z.object({
   content: z.string().min(1),
 });
 
+export const targetJobSchema = z.object({
+  title: z.preprocess((value) => coerceString(value), z.string().min(1)),
+  description: z.preprocess((value) => coerceString(value), z.string()).default(""),
+});
+
 export const personalInfoSchema = z.object({
   name: z.preprocess((value) => coerceString(value), z.string()).default(""),
   age: z.preprocess((value) => coerceString(value), z.string()).default(""),
@@ -651,12 +656,27 @@ export const finalResumeReviewSchema = z.preprocess(
   }),
 );
 
+export const resumeRewriteResponseFormatSchema = z.object({
+  rewrittenContent: z.string(),
+  explanation: z.string(),
+});
+
+export const resumeRewriteSchema = z.object({
+  rewrittenContent: z.preprocess((value) => coerceString(value), z.string()).default(""),
+  explanation: z.preprocess((value) => coerceString(value), z.string()).default(""),
+});
+
+export type ResumeRewrite = z.infer<typeof resumeRewriteSchema>;
+
 export const reviewRunResultSchema = z.object({
   document: resumeDocumentSchema,
+  targetJob: targetJobSchema.optional(),
   profile: resumeProfileSchema,
   reviewerFeedback: z.array(reviewerFeedbackSchema).default([]),
   finalReview: finalResumeReviewSchema,
+  rewrite: resumeRewriteSchema.optional(),
 });
+
 
 export const reviewStageProgressPhaseSchema = z.enum([
   "requesting_model",
@@ -692,6 +712,7 @@ export const reviewStreamChunkSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ResumeDocument = z.infer<typeof resumeDocumentSchema>;
+export type TargetJob = z.infer<typeof targetJobSchema>;
 export type PersonalInfo = z.infer<typeof personalInfoSchema>;
 export type ResumeSignalHints = z.infer<typeof resumeSignalHintsSchema>;
 export type SkillGroup = z.infer<typeof skillGroupSchema>;

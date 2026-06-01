@@ -1,12 +1,13 @@
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
 
-import { resumeDocumentSchema, type ResumeDocument } from "@/lib/review/schemas";
+import { resumeDocumentSchema, type ResumeDocument, type TargetJob } from "@/lib/review/schemas";
 
 export class UnsupportedResumeFormatError extends Error {}
 
 export type ResumeSource = {
   resumeFile: File;
+  targetJob: TargetJob;
 };
 
 const SUPPORTED_SUFFIXES = new Set([".txt", ".md", ".pdf", ".docx"]);
