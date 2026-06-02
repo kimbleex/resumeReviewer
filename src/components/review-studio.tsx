@@ -2098,6 +2098,22 @@ export function ReviewStudio({
   const [finalResult, setFinalResult] = useState<ReviewRunResult | null>(null);
   const [selectedStage, setSelectedStage] = useState<StageName>("resume_loader");
   const [detailsStage, setDetailsStage] = useState<StageName | null>(null);
+  const [isIdentityMenuOpen, setIsIdentityMenuOpen] = useState(false);
+  const floatingMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        floatingMenuRef.current &&
+        !floatingMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsIdentityMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const phaseTimelineRef = useRef<Partial<Record<StageName, ReviewStageProgressPhase>>>({});
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2392,25 +2408,14 @@ export function ReviewStudio({
       <header className="compact-topbar">
         <div className="topbar-brand">
           <span className="eyebrow">RESUME DIAGNOSTIC CORE</span>
-          <h1>多 Agent 智能简历评审工作台</h1>
-        </div>
-
-        <div className="identity-strip" aria-label="当前访问身份">
-          <span className={`identity-pill ${isBlocked ? "is-blocked" : ""}`}>
-            {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={14} /> : <User size={14} />}
-            {identityLabel}
-          </span>
-          {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
-            <a className="identity-link" href="/admin">
-              管理面板
-            </a>
-          ) : null}
-          {identity?.kind === "user" ? (
-            <button className="identity-link" type="button" onClick={handleLogout}>
-              <LogOut size={13} />
-              退出
-            </button>
-          ) : null}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+            <h1 style={{ margin: 0 }}>多 Agent 智能简历评审工作台</h1>
+            {identity && (
+              <span className={`identity-badge identity-badge-${identity.kind === "user" ? (identity.user.role === "ADMIN" ? "admin" : "member") : "guest"}`}>
+                {identity.kind === "user" ? (identity.user.role === "ADMIN" ? "管理员" : "正式成员") : `游客试用 (余 ${guestRemainingTrialCount} 次)`}
+              </span>
+            )}
+          </div>
         </div>
 
         <form className="topbar-actions" onSubmit={handleSubmit}>
@@ -2521,6 +2526,56 @@ export function ReviewStudio({
           />
         ) : null}
       </section>
+
+      {/* Floating Identity Hub */}
+      <div className="floating-identity-container" ref={floatingMenuRef}>
+        <button
+          className={`floating-identity-trigger ${isIdentityMenuOpen ? "is-open" : ""}`}
+          type="button"
+          onClick={() => setIsIdentityMenuOpen((prev) => !prev)}
+          aria-label="打开身份设置"
+        >
+          {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={20} /> : <User size={20} />}
+        </button>
+
+        {isIdentityMenuOpen ? (
+          <div className="floating-identity-panel">
+            <div className="floating-identity-userinfo">
+              <div className={`floating-identity-avatar ${identity?.kind === "user" && identity.user.role === "ADMIN" ? "floating-identity-avatar-admin" : ""}`}>
+                {identity?.kind === "user" ? identity.user.username.slice(0, 2).toUpperCase() : "G"}
+              </div>
+              <div className="floating-identity-text">
+                <span className="floating-identity-name">
+                  {identity?.kind === "user" ? identity.user.username : "临时游客"}
+                </span>
+                <span className="floating-identity-role">
+                  {identity?.kind === "user" ? (identity.user.role === "ADMIN" ? "系统管理员" : "正式账户") : `游客体验 (剩余 ${guestRemainingTrialCount} 次)`}
+                </span>
+              </div>
+            </div>
+            
+            <div className="floating-identity-actions">
+              {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
+                <a className="floating-identity-action-btn admin-link" href="/admin">
+                  <Shield size={14} />
+                  管理面板
+                </a>
+              ) : null}
+              {identity?.kind === "user" ? (
+                <button className="floating-identity-action-btn logout-btn" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
+                  <LogOut size={14} />
+                  退出登录
+                </button>
+              ) : (
+                <a className="floating-identity-action-btn admin-link" href="/login" style={{ fontSize: "0.78rem" }}>
+                  <LogOut size={14} style={{ transform: "rotate(180deg)" }} />
+                  登录正式账号
+                </a>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </main>
   );
 }

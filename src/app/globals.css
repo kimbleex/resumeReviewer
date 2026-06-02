@@ -3217,3 +3217,192 @@ textarea {
   color: rgba(255, 255, 255, 0.88);
   text-align: justify;
 }
+
+/* Identity Badge adjacent to top-left Title */
+.identity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 99px;
+  line-height: 1;
+}
+
+.identity-badge-admin {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(239, 68, 68, 0.12));
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: var(--gold);
+}
+
+.identity-badge-member {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(0, 242, 254, 0.12));
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  color: var(--green);
+}
+
+.identity-badge-guest {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+}
+
+/* Floating Identity Menu in Bottom Right */
+.floating-identity-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+}
+
+.floating-identity-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.15), rgba(139, 92, 246, 0.15));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 0 12px rgba(0, 242, 254, 0.15);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.floating-identity-trigger:hover,
+.floating-identity-trigger.is-open {
+  border-color: var(--cyan);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.25), rgba(139, 92, 246, 0.25));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 242, 254, 0.35);
+  transform: translateY(-2px) scale(1.05);
+}
+
+.floating-identity-trigger:active {
+  transform: translateY(0) scale(1);
+}
+
+.floating-identity-panel {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  right: 0;
+  z-index: 110;
+  width: 250px;
+  padding: 16px;
+  border: 1px solid rgba(0, 242, 254, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.005)), var(--bg-elevated);
+  backdrop-filter: blur(25px);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 242, 254, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform-origin: bottom right;
+  animation: floatingPanelIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.floating-identity-userinfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.floating-identity-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 99px;
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(139, 92, 246, 0.2));
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  color: var(--cyan);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.floating-identity-avatar-admin {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(239, 68, 68, 0.25));
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--gold);
+}
+
+.floating-identity-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.floating-identity-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-identity-role {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.floating-identity-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.floating-identity-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  width: 100%;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.floating-identity-action-btn.admin-link {
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: rgba(0, 242, 254, 0.05);
+  color: var(--cyan);
+}
+
+.floating-identity-action-btn.admin-link:hover {
+  border-color: var(--cyan);
+  background: rgba(0, 242, 254, 0.12);
+  transform: translateY(-1px);
+}
+
+.floating-identity-action-btn.logout-btn {
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.04);
+  color: var(--red-dim);
+}
+
+.floating-identity-action-btn.logout-btn:hover {
+  border-color: var(--red);
+  background: rgba(239, 68, 68, 0.09);
+  transform: translateY(-1px);
+}
+
+@keyframes floatingPanelIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
