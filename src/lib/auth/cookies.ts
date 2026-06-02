@@ -29,6 +29,10 @@ export function clearAuthCookies(response: NextResponse) {
   response.cookies.delete(REFRESH_TOKEN_COOKIE);
 }
 
+export function clearGuestCookie(response: NextResponse) {
+  response.cookies.delete(GUEST_ID_COOKIE);
+}
+
 export function setGuestCookie(response: NextResponse, guestId: string) {
   response.cookies.set(GUEST_ID_COOKIE, guestId, {
     httpOnly: true,
