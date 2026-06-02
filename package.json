@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "test": "node --import tsx --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.66",
