@@ -41,7 +41,6 @@ export type ReviewerAgentExecutor = {
   name: "hr_agent" | "interviewer_agent" | "career_master_agent";
   perspective: string;
   run: (
-    document: ResumeDocument,
     profile: ResumeProfile,
     targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
@@ -58,8 +57,6 @@ export type ReviewPipelineDependencies = {
   ) => Promise<ResumeProfile>;
   reviewerAgents: ReviewerAgentExecutor[];
   runSummary: (
-    document: ResumeDocument,
-    profile: ResumeProfile,
     reviewerFeedback: ReviewerFeedback[],
     targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
@@ -67,8 +64,6 @@ export type ReviewPipelineDependencies = {
   ) => Promise<FinalResumeReview>;
   runRewrite: (
     document: ResumeDocument,
-    profile: ResumeProfile,
-    reviewerFeedback: ReviewerFeedback[],
     finalReview: FinalResumeReview,
     targetJob?: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
@@ -186,6 +181,7 @@ export async function runReviewPipeline(
   const resumeState = normalizeResumeState(options.resumeState);
   const abortSignal = options.abortSignal;
 
+  // ── Stage 1: Loader ──────────────────────────────────────────────────
   throwIfAborted(abortSignal);
   const document = resumeState.document ?? (await (async () => {
     emit(eventHandler, {
@@ -216,6 +212,7 @@ export async function runReviewPipeline(
     emitCachedStageCompleted(eventHandler, "resume_loader", document, [`类型: ${document.fileType}`, `路径: ${document.path}`]);
   }
 
+  // ── Stage 2: Parser (receives Loader output) ─────────────────────────
   throwIfAborted(abortSignal);
   const profile = resumeState.profile ?? (await (async () => {
     emit(eventHandler, {
@@ -225,8 +222,7 @@ export async function runReviewPipeline(
       title: "解析简历",
       message: "正在抽取候选人画像与缺口",
       details: [
-        "已成功接收来自 Loader (加载简历) 节点的简历原始文件文本。",
-        "已成功接收目标岗位要求，开始抽取核心工作经历与关键专业技能。"
+        "已接收 Loader 节点输出 → 简历原始文件文本",
       ],
       snippet: "",
       payload: null,
@@ -254,6 +250,7 @@ export async function runReviewPipeline(
     emitCachedStageCompleted(eventHandler, "resume_parser", profile, profile.reasoningSummary);
   }
 
+  // ── Stage 3: Three Review Agents (each receives only Parser output) ──
   throwIfAborted(abortSignal);
   const reviewerFeedback = await Promise.all(
     deps.reviewerAgents.map(async (reviewer) => {
@@ -270,15 +267,13 @@ export async function runReviewPipeline(
         title: `${stageTitles[reviewer.name]} 开始评审`,
         message: `正在从 ${reviewer.perspective} 视角分析简历`,
         details: [
-          "已成功接收来自 Loader 节点的原始简历文本。",
-          "已成功接收来自 Parser 节点的候选人结构化画像与评估维度。",
-          `已成功接收目标岗位配置: 【${targetJob.title}】的胜任标准。`
+          "已接收 Parser 节点输出 → 候选人结构化画像与评估维度",
+          `已接收目标岗位配置 →【${targetJob.title}】`,
         ],
         snippet: "",
         payload: null,
       });
       const feedback = await reviewer.run(
-        document,
         profile,
         targetJob,
         (progress) => {
@@ -300,6 +295,7 @@ export async function runReviewPipeline(
     }),
   );
 
+  // ── Stage 4: Summary (receives only the 3 agents' feedback) ──────────
   throwIfAborted(abortSignal);
   const finalReview = resumeState.finalReview ?? (await (async () => {
     emit(eventHandler, {
@@ -309,17 +305,14 @@ export async function runReviewPipeline(
       title: "汇总建议",
       message: "正在整合多 Agent 结论",
       details: [
-        "已成功接收来自 Parser 节点的完整候选人画像与结构化信息。",
-        "已成功接收来自 HR Agent 视角的初筛报告与评估得分。",
-        "已成功接收来自 Interviewer Agent 视角的面试评估与评分。",
-        "已成功接收来自 Career Master Agent 视角的职业规划与胜任度建议。"
+        "已接收 HR Agent 输出 → 初筛报告与评估得分",
+        "已接收 Interviewer Agent 输出 → 面试评估与评分",
+        "已接收 Career Master Agent 输出 → 职业规划与胜任度建议",
       ],
       snippet: "",
       payload: null,
     });
     const review = await deps.runSummary(
-      document,
-      profile,
       reviewerFeedback,
       targetJob,
       (progress) => {
@@ -343,6 +336,7 @@ export async function runReviewPipeline(
     emitCachedStageCompleted(eventHandler, "summary_agent", finalReview, finalReview.reasoningSummary);
   }
 
+  // ── Stage 5: Rewrite (receives only Summary output + original doc) ───
   throwIfAborted(abortSignal);
   const rewriteResult = resumeState.rewrite ?? (await (async () => {
     emit(eventHandler, {
@@ -352,17 +346,14 @@ export async function runReviewPipeline(
       title: "智能改写简历",
       message: "正在根据终审建议重构简历",
       details: [
-        "已成功接收来自 Summary Agent 节点的终审改写优化指导意见。",
-        "已成功接收来自 3 个评审 Expert Agent 的全方位反馈与得分明细。",
-        "已成功接收来自 Parser 节点的简历画像数据与 Loader 的原始文档结构。"
+        "已接收 Summary Agent 输出 → 终审改写优化指导意见",
+        "已接收 Loader 节点输出 → 原始简历文档（作为改写基底）",
       ],
       snippet: "",
       payload: null,
     });
     const rewrite = await deps.runRewrite(
       document,
-      profile,
-      reviewerFeedback,
       finalReview,
       targetJob,
       (progress) => {

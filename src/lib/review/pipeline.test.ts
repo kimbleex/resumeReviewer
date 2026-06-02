@@ -197,7 +197,7 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
         return profile;
       },
       reviewerAgents: [],
-      runSummary: async (_document, _profile, _feedback, _targetJob, onProgress) => {
+      runSummary: async (_feedback, _targetJob, onProgress) => {
         onProgress?.({
           phase: "validating_output",
           message: "正在校验最终结构化结果。",
@@ -307,13 +307,13 @@ test("runReviewPipeline forwards abort signal to each agent executor", async () 
         {
           name: "hr_agent",
           perspective: "HR",
-          run: async (_document, _profile, _targetJob, _onProgress, abortSignal) => {
+          run: async (_profile, _targetJob, _onProgress, abortSignal) => {
             reviewerSignal = abortSignal;
             return feedback;
           },
         },
       ],
-      runSummary: async (_document, _profile, _feedback, _targetJob, _onProgress, abortSignal) => {
+      runSummary: async (_feedback, _targetJob, _onProgress, abortSignal) => {
         summarySignal = abortSignal;
         return {
           overallScore: 82,
@@ -325,7 +325,7 @@ test("runReviewPipeline forwards abort signal to each agent executor", async () 
           sectionRevisions: [],
         };
       },
-      runRewrite: async (_document, _profile, _feedback, _finalReview, _targetJob, _onProgress, abortSignal) => {
+      runRewrite: async (_document, _finalReview, _targetJob, _onProgress, abortSignal) => {
         rewriteSignal = abortSignal;
         return {
           rewrittenContent: "# Taylor\n\nRewritten resume content.",
@@ -398,13 +398,13 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
         {
           name: "hr_agent",
           perspective: "HR",
-          run: async (_document, _profile, context) => {
+          run: async (_profile, context) => {
             reviewerContexts.push(context);
             return reviewerFeedback;
           },
         },
       ],
-      runSummary: async (_document, _profile, _feedback, context) => {
+      runSummary: async (_feedback, context) => {
         summaryContext = context;
         return {
           overallScore: 84,
@@ -416,7 +416,7 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
           sectionRevisions: [],
         };
       },
-      runRewrite: async (_document, _profile, _feedback, _finalReview, context) => {
+      runRewrite: async (_document, _finalReview, context) => {
         rewriteContext = context;
         return {
           rewrittenContent: "# Riley\n\nRewritten resume content.",
@@ -513,7 +513,7 @@ test("runReviewPipeline resumes from completed stage payloads and only reruns mi
         { name: "interviewer_agent", perspective: "Interviewer", run: async () => freshInterviewerFeedback },
         { name: "career_master_agent", perspective: "Career Master", run: async () => freshCareerFeedback },
       ],
-      runSummary: async (_document, _profile, feedback) => {
+      runSummary: async (feedback) => {
         summaryFeedbackNames = feedback.map((item) => item.agentName);
         return {
           overallScore: 80,

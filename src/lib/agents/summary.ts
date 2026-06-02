@@ -4,15 +4,11 @@ import {
   finalResumeReviewResponseFormatSchema,
   finalResumeReviewSchema,
   type FinalResumeReview,
-  type ResumeDocument,
-  type ResumeProfile,
   type ReviewerFeedback,
   type TargetJob,
 } from "@/lib/review/schemas";
 
 export async function runSummaryAgent(
-  document: ResumeDocument,
-  profile: ResumeProfile,
   reviewerFeedback: ReviewerFeedback[],
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
@@ -26,19 +22,19 @@ export async function runSummaryAgent(
     onProgress,
     abortSignal,
     userContent: `
-请整合下面这些结构化结果，输出最终简历修改方案。
+请整合下面三位专家 Agent 的评审意见，输出最终简历修改方案。
 
 目标岗位上下文：
 ${formatTargetJobContext(targetJob)}
 
-简历信息：
-${dumpJson(document)}
+HR Agent 评审反馈：
+${dumpJson(reviewerFeedback.find(f => f.agentName === "hr_agent") || reviewerFeedback[0])}
 
-候选人画像：
-${dumpJson(profile)}
+Interviewer Agent 评审反馈：
+${dumpJson(reviewerFeedback.find(f => f.agentName === "interviewer_agent") || reviewerFeedback[1])}
 
-多 Agent 反馈：
-${dumpJson(reviewerFeedback)}
+Career Master Agent 评审反馈：
+${dumpJson(reviewerFeedback.find(f => f.agentName === "career_master_agent") || reviewerFeedback[2])}
     `.trim(),
   });
 }

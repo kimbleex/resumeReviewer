@@ -3,14 +3,12 @@ import { buildHrPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
   reviewerFeedbackSchema,
-  type ResumeDocument,
   type ResumeProfile,
   type ReviewerFeedback,
   type TargetJob,
 } from "@/lib/review/schemas";
 
 export async function runHrReviewer(
-  document: ResumeDocument,
   profile: ResumeProfile,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
@@ -29,10 +27,7 @@ export async function runHrReviewer(
 目标岗位上下文：
 ${formatTargetJobContext(targetJob)}
 
-简历信息：
-${dumpJson(document)}
-
-解析后的候选人画像：
+解析后的候选人结构化画像：
 ${dumpJson(profile)}
     `.trim(),
   });
