@@ -34,6 +34,8 @@ import {
   User,
   Download,
   Edit,
+  LogOut,
+  Shield,
 } from "lucide-react";
 
 import {
@@ -53,6 +55,27 @@ import {
 } from "@/lib/review/schemas";
 
 type StageStatus = "pending" | "running" | "done";
+
+export type ReviewIdentity =
+  | {
+      kind: "user";
+      user: {
+        id: string;
+        username: string;
+        role: "ADMIN" | "MEMBER";
+        status: "ACTIVE" | "BLOCKED";
+      };
+    }
+  | {
+      kind: "guest";
+      guest: {
+        id: string;
+        status: "ACTIVE" | "BLOCKED";
+        trialUsedCount: number;
+        maxTrialCount: number;
+        remainingTrialCount: number;
+      };
+    };
 
 const STAGE_ORDER = [
   "resume_loader",
@@ -2052,7 +2075,13 @@ function StageDetailDrawer({
   );
 }
 
-export function ReviewStudio() {
+export function ReviewStudio({
+  identity,
+  onSessionChanged,
+}: {
+  identity?: ReviewIdentity;
+  onSessionChanged?: () => void;
+}) {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [targetRole, setTargetRole] = useState("");
   const [targetDescription, setTargetDescription] = useState("");
@@ -2072,6 +2101,29 @@ export function ReviewStudio() {
   const phaseTimelineRef = useRef<Partial<Record<StageName, ReviewStageProgressPhase>>>({});
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isGuest = identity?.kind === "guest";
+  const guestRemainingTrialCount = isGuest ? identity.guest.remainingTrialCount : 0;
+  const isBlocked =
+    identity?.kind === "user"
+      ? identity.user.status !== "ACTIVE"
+      : identity?.kind === "guest"
+        ? identity.guest.status !== "ACTIVE"
+        : true;
+  const canRunReview =
+    !!identity &&
+    !isBlocked &&
+    (identity.kind === "user" || identity.guest.remainingTrialCount > 0);
+  const identityLabel =
+    identity?.kind === "user"
+      ? `${identity.user.username} · ${identity.user.role === "ADMIN" ? "管理员" : "正式成员"}`
+      : identity?.kind === "guest"
+        ? `游客试用 · 剩余 ${guestRemainingTrialCount} 次`
+        : "未登录";
+
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    onSessionChanged?.();
+  }, [onSessionChanged]);
 
   const flushPendingProgressEvents = useCallback(() => {
     if (progressFlushTimerRef.current) {
@@ -2173,10 +2225,12 @@ export function ReviewStudio() {
           setFinalResult(chunk.result);
           setSelectedStage("rewrite_agent");
           setIsRunning(false);
+          onSessionChanged?.();
           continue;
         }
         setErrorMessage(chunk.message);
         setIsRunning(false);
+        onSessionChanged?.();
       }
 
       if (done) {
@@ -2283,6 +2337,10 @@ export function ReviewStudio() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!canRunReview) {
+      setErrorMessage(isGuest ? "游客试用次数已用完，请登录正式账号。" : "当前身份无权启动诊断。");
+      return;
+    }
     if (!resumeFile) {
       setErrorMessage("请先上传简历文件。");
       return;
@@ -2335,6 +2393,24 @@ export function ReviewStudio() {
         <div className="topbar-brand">
           <span className="eyebrow">RESUME DIAGNOSTIC CORE</span>
           <h1>多 Agent 智能简历评审工作台</h1>
+        </div>
+
+        <div className="identity-strip" aria-label="当前访问身份">
+          <span className={`identity-pill ${isBlocked ? "is-blocked" : ""}`}>
+            {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={14} /> : <User size={14} />}
+            {identityLabel}
+          </span>
+          {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
+            <a className="identity-link" href="/admin">
+              管理面板
+            </a>
+          ) : null}
+          {identity?.kind === "user" ? (
+            <button className="identity-link" type="button" onClick={handleLogout}>
+              <LogOut size={13} />
+              退出
+            </button>
+          ) : null}
         </div>
 
         <form className="topbar-actions" onSubmit={handleSubmit}>
@@ -2409,7 +2485,7 @@ export function ReviewStudio() {
             ) : null}
           </div>
 
-          <button className="primary-action" type="submit" disabled={isRunning}>
+          <button className="primary-action" type="submit" disabled={isRunning || !canRunReview}>
             {isRunning ? <LoaderCircle className="spin-icon" size={17} /> : <Play size={17} />}
             {isRunning ? "专家团诊断中..." : "启动简历诊断"}
           </button>

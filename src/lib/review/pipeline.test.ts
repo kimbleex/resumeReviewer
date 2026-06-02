@@ -97,6 +97,10 @@ test("runReviewPipeline runs stages in the expected order", async () => {
         scoreBreakdown: [],
         sectionRevisions: [],
       }),
+      runRewrite: async () => ({
+        rewrittenContent: "# Alex\n\nRewritten resume content.",
+        explanation: "Applied summary guidance to produce the final resume.",
+      }),
     },
   );
 
@@ -130,9 +134,11 @@ test("runReviewPipeline runs stages in the expected order", async () => {
 
   assert.ok(reviewerCompletionIndices.every((index) => index > 0));
   assert.ok(reviewerCompletionIndices.every((index) => index < firstSummaryEventIndex));
-  assert.deepEqual(events.slice(-3), [
+  assert.deepEqual(events.slice(-5), [
     { kind: "stage_started", stage: "summary_agent" },
     { kind: "stage_completed", stage: "summary_agent" },
+    { kind: "stage_started", stage: "rewrite_agent" },
+    { kind: "stage_completed", stage: "rewrite_agent" },
     { kind: "pipeline_completed", stage: "review_pipeline" },
   ]);
 });
@@ -206,6 +212,10 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
           sectionRevisions: [],
         };
       },
+      runRewrite: async () => ({
+        rewrittenContent: "# Taylor\n\nRewritten resume content.",
+        explanation: "Applied final review guidance.",
+      }),
     },
   );
 
@@ -245,6 +255,7 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
   };
   const reviewerContexts: TargetJob[] = [];
   let summaryContext: TargetJob | undefined;
+  let rewriteContext: TargetJob | undefined;
 
   const document: ResumeDocument = {
     path: "upload://resume.txt",
@@ -308,9 +319,17 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
           sectionRevisions: [],
         };
       },
+      runRewrite: async (_document, _profile, _feedback, _finalReview, context) => {
+        rewriteContext = context;
+        return {
+          rewrittenContent: "# Riley\n\nRewritten resume content.",
+          explanation: "Aligned resume to target role.",
+        };
+      },
     },
   );
 
   assert.deepEqual(reviewerContexts, [targetJob]);
   assert.deepEqual(summaryContext, targetJob);
+  assert.deepEqual(rewriteContext, targetJob);
 });

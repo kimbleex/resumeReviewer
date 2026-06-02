@@ -1,5 +1,5 @@
-import { ReviewStudio } from "@/components/review-studio";
+import { AuthGateway } from "@/components/auth-gateway";
 
 export default function HomePage() {
-  return <ReviewStudio />;
+  return <AuthGateway />;
 }
