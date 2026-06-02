@@ -43,7 +43,7 @@ export async function createAccessToken(options: CreateAccessTokenOptions): Prom
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(options.userId)
     .setIssuedAt()
-    .setExpirationTime(options.expiresIn ?? "15m")
+    .setExpirationTime(options.expiresIn ?? "2h")
     .sign(encodeSecret(secret));
 }
 

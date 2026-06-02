@@ -116,6 +116,18 @@ export function AuthGateway() {
         return;
       }
 
+      // Access token expired — try silent refresh using the refresh token cookie.
+      // This prevents users from being kicked out during long AI pipeline runs.
+      const refreshResponse = await fetch("/api/auth/refresh", { method: "POST" });
+      if (refreshResponse.ok) {
+        const refreshed = (await refreshResponse.json()) as { user: UserSummary | null };
+        if (refreshed.user) {
+          setIdentity({ kind: "user", user: refreshed.user });
+          return;
+        }
+      }
+
+      // Neither user token nor refresh token worked — check guest identity
       const guestResponse = await fetch("/api/guest/me");
       const guest = (await guestResponse.json()) as { guest: GuestSummary | null };
       setIdentity(guest.guest ? { kind: "guest", guest: guest.guest } : null);
@@ -127,6 +139,15 @@ export function AuthGateway() {
 
   useEffect(() => {
     void refreshIdentity();
+
+    // Proactively refresh the access token every 90 minutes (token lives 2h).
+    // This keeps the session alive during very long diagnostic runs without
+    // waiting for the token to fully expire before renewing.
+    const proactiveRefreshTimer = setInterval(() => {
+      void fetch("/api/auth/refresh", { method: "POST" }).catch(() => undefined);
+    }, 90 * 60 * 1000);
+
+    return () => clearInterval(proactiveRefreshTimer);
   }, [refreshIdentity]);
 
   // Guest claim registration handler

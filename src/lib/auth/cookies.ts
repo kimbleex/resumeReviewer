@@ -13,7 +13,7 @@ export function setAuthCookies(response: NextResponse, tokens: { accessToken: st
     sameSite: "lax",
     secure: isProduction,
     path: "/",
-    maxAge: 15 * 60,
+    maxAge: 2 * 60 * 60,
   });
   response.cookies.set(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
     httpOnly: true,
