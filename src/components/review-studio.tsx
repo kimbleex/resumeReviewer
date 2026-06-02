@@ -53,8 +53,19 @@ import {
   resumeRewriteSchema,
   type ResumeRewrite,
 } from "@/lib/review/schemas";
+import {
+  buildReviewResumeState,
+  failRunningStages,
+  hasReusableReviewState,
+  interruptRunningStages,
+  loadLocalReviewRun,
+  saveLocalReviewRun,
+  tryReconstructReviewRunResult,
+  type LocalReviewRunSnapshot,
+  type LocalReviewStageStatus,
+} from "@/lib/review/local-run-cache";
 
-type StageStatus = "pending" | "running" | "done";
+type StageStatus = LocalReviewStageStatus;
 
 export type ReviewIdentity =
   | {
@@ -93,8 +104,7 @@ type StageLogEntry = {
   timestamp: string;
   phase: ReviewStageProgressPhase | null;
   message: string;
-  snippet?: string;
-  type?: "info" | "thinking" | "output" | "success" | "error";
+  type?: "info" | "success" | "error";
 };
 
 type StageLiveState = {
@@ -102,8 +112,6 @@ type StageLiveState = {
   latestMessage: string;
   details: string[];
   logs?: StageLogEntry[];
-  reasoning?: string;
-  output?: string;
 };
 
 const STAGE_META: Record<
@@ -159,14 +167,75 @@ function createInitialStageStatus(): Record<StageName, StageStatus> {
   };
 }
 
+function isStageReadyToRun(stage: StageName, stagePayloads: Partial<Record<StageName, unknown>>): boolean {
+  if (stage === "resume_loader") {
+    return true;
+  }
+  if (stage === "resume_parser") {
+    return Boolean(stagePayloads.resume_loader);
+  }
+  const parallelReviewers: StageName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
+  if (parallelReviewers.includes(stage)) {
+    return Boolean(stagePayloads.resume_parser);
+  }
+  if (stage === "summary_agent") {
+    return Boolean(
+      stagePayloads.hr_agent &&
+      stagePayloads.interviewer_agent &&
+      stagePayloads.career_master_agent
+    );
+  }
+  if (stage === "rewrite_agent") {
+    return Boolean(stagePayloads.summary_agent);
+  }
+  return false;
+}
+
+function getStagesToReset(startStage: StageName): StageName[] {
+  const parallelReviewers: StageName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
+  
+  if (startStage === "resume_loader") {
+    return [...STAGE_ORDER];
+  } else if (startStage === "resume_parser") {
+    return STAGE_ORDER.slice(1) as unknown as StageName[];
+  } else if (parallelReviewers.includes(startStage)) {
+    return [startStage, "summary_agent", "rewrite_agent"];
+  } else if (startStage === "summary_agent") {
+    return ["summary_agent", "rewrite_agent"];
+  } else if (startStage === "rewrite_agent") {
+    return ["rewrite_agent"];
+  }
+  return [];
+}
+
+function createReviewRunId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `local-run-${Date.now()}`;
+}
+
+function getReviewOwnerKey(identity?: ReviewIdentity): string {
+  if (identity?.kind === "user") {
+    return `user:${identity.user.id}`;
+  }
+  if (identity?.kind === "guest") {
+    return `guest:${identity.guest.id}`;
+  }
+  return "anonymous";
+}
+
+function firstActiveStage(stageStatus: Record<StageName, StageStatus>): StageName {
+  return (
+    STAGE_ORDER.find((stage) => ["running", "interrupted", "failed"].includes(stageStatus[stage])) ??
+    STAGE_ORDER.find((stage) => stageStatus[stage] !== "done") ??
+    "rewrite_agent"
+  );
+}
+
 function createEmptyStageLiveState(): StageLiveState {
   return {
     phase: null,
     latestMessage: "",
     details: [],
     logs: [],
-    reasoning: "",
-    output: "",
   };
 }
 
@@ -179,63 +248,35 @@ function applyStageProgressEvent(
 ) {
   const current = previous[stage] ?? createEmptyStageLiveState();
   const nextPhase = event.phase ?? current.phase;
-  const payload = event.payload as Record<string, unknown> | null;
-  const streamType = payload?.streamType;
-
-  let updatedReasoning = current.reasoning || "";
-  let updatedOutput = current.output || "";
-
-  if (streamType === "reasoning" && event.snippet) {
-    updatedReasoning += event.snippet;
-  } else if ((streamType === "output_text" || streamType === "partial_object") && event.snippet) {
-    updatedOutput += event.snippet;
-  }
 
   const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   const newLog: StageLogEntry = {
     timestamp,
     phase: nextPhase,
     message: event.message,
-    snippet: event.snippet || undefined,
-    type:
-      streamType === "reasoning"
-        ? "thinking"
-        : streamType === "output_text" || streamType === "partial_object"
-          ? "output"
-          : "info",
+    type: "info",
   };
 
   const prevLogs = current.logs || [];
   let updatedLogs = [...prevLogs];
   const lastLog = prevLogs[prevLogs.length - 1];
 
-  if (
-    lastLog &&
-    lastLog.phase === newLog.phase &&
-    lastLog.type === newLog.type &&
-    (newLog.type === "thinking" || newLog.type === "output")
-  ) {
+  if (lastLog && lastLog.phase === newLog.phase && lastLog.message === newLog.message) {
     updatedLogs[updatedLogs.length - 1] = {
       ...lastLog,
-      message: newLog.message,
-      snippet: (lastLog.snippet || "") + (newLog.snippet || ""),
+      timestamp,
     };
   } else {
     updatedLogs.push(newLog);
   }
 
-  const shouldRefreshWorkflowText =
-    !event.snippet || nextPhase !== current.phase || !current.latestMessage;
-
   return {
     ...previous,
     [stage]: {
       phase: nextPhase,
-      latestMessage: shouldRefreshWorkflowText ? event.message || current.latestMessage : current.latestMessage,
-      details: event.details.length > 0 && shouldRefreshWorkflowText ? event.details : current.details,
-      reasoning: updatedReasoning,
-      output: updatedOutput,
-      logs: updatedLogs.slice(-80),
+      latestMessage: event.message || current.latestMessage,
+      details: event.details.length > 0 ? event.details : current.details,
+      logs: updatedLogs.slice(-24),
     },
   };
 }
@@ -246,6 +287,43 @@ function isStageName(value: string): value is StageName {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeStageLiveState(value: unknown): StageLiveState {
+  if (!isRecord(value)) {
+    return createEmptyStageLiveState();
+  }
+
+  const logs = Array.isArray(value.logs)
+    ? value.logs
+      .filter(isRecord)
+      .map((log) => ({
+        timestamp: typeof log.timestamp === "string" ? log.timestamp : "",
+        phase: (typeof log.phase === "string" ? log.phase : null) as ReviewStageProgressPhase | null,
+        message: typeof log.message === "string" ? log.message : "",
+        type: (log.type === "success" || log.type === "error" ? log.type : "info") as StageLogEntry["type"],
+      }))
+      .filter((log) => log.message)
+      .slice(-24)
+    : [];
+
+  return {
+    phase: (typeof value.phase === "string" ? value.phase : null) as ReviewStageProgressPhase | null,
+    latestMessage: typeof value.latestMessage === "string" ? value.latestMessage : "",
+    details: Array.isArray(value.details) ? value.details.filter((item): item is string => typeof item === "string") : [],
+    logs,
+  };
+}
+
+function sanitizeStageStreams(
+  streams: Partial<Record<StageName, unknown>>,
+): Partial<Record<StageName, StageLiveState>> {
+  return STAGE_ORDER.reduce<Partial<Record<StageName, StageLiveState>>>((nextStreams, stage) => {
+    if (streams[stage]) {
+      nextStreams[stage] = sanitizeStageLiveState(streams[stage]);
+    }
+    return nextStreams;
+  }, {});
 }
 
 function formatStageLabel(value: string): string {
@@ -302,6 +380,12 @@ function formatWorkflowStatus(status: StageStatus, phase: ReviewStageProgressPha
   }
   if (status === "running") {
     return "执行诊断中";
+  }
+  if (status === "interrupted") {
+    return "已中断，可继续";
+  }
+  if (status === "failed") {
+    return "执行失败，可重试";
   }
   return "等待队列中";
 }
@@ -740,6 +824,10 @@ const StageWorkflowCard = memo(function StageWorkflowCard({
   status,
   liveState,
   onOpenStageDetails,
+  onStartStage,
+  onInterrupt,
+  isRunningAny,
+  isReady,
 }: {
   stage: StageName;
   index: number;
@@ -748,15 +836,26 @@ const StageWorkflowCard = memo(function StageWorkflowCard({
   status: StageStatus;
   liveState: StageLiveState;
   onOpenStageDetails: (stage: StageName) => void;
+  onStartStage: (stage: StageName) => void;
+  onInterrupt: () => void;
+  isRunningAny: boolean;
+  isReady: boolean;
 }) {
   const meta = STAGE_META[stage];
   const statusLabel = formatWorkflowStatus(status, liveState.phase);
 
   return (
-    <button
+    <div
       className={`workflow-node-card workflow-node-${status} ${isSelected ? "is-selected" : ""} ${hasResult ? "has-result" : ""}`}
-      type="button"
       onClick={() => onOpenStageDetails(stage)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenStageDetails(stage);
+        }
+      }}
       aria-label={`打开 ${meta.label} 节点详情，当前状态：${statusLabel}`}
       aria-pressed={isSelected}
     >
@@ -767,21 +866,79 @@ const StageWorkflowCard = memo(function StageWorkflowCard({
           {liveState.latestMessage || meta.focus}
         </span>
       </span>
-      <StageStatusIndicator status={status} label={statusLabel} />
-    </button>
+      <StageStatusIndicator
+        stage={stage}
+        status={status}
+        label={statusLabel}
+        onStartStage={onStartStage}
+        onInterrupt={onInterrupt}
+        isRunningAny={isRunningAny}
+        isReady={isReady}
+      />
+    </div>
   );
 });
 
-function StageStatusIndicator({ status, label }: { status: StageStatus; label: string }) {
+function StageStatusIndicator({
+  stage,
+  status,
+  label,
+  onStartStage,
+  onInterrupt,
+  isRunningAny,
+  isReady,
+}: {
+  stage: StageName;
+  status: StageStatus;
+  label: string;
+  onStartStage: (stage: StageName) => void;
+  onInterrupt: () => void;
+  isRunningAny: boolean;
+  isReady: boolean;
+}) {
   if (status === "running") {
     return (
-      <span
-        className="workflow-node-status-indicator workflow-node-status-indicator-running"
-        aria-label={label}
-        title={label}
+      <button
+        className="workflow-node-status-indicator workflow-node-status-indicator-running interactive-status-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onInterrupt();
+        }}
+        aria-label="中断诊断"
+        title="点击中断诊断"
+        type="button"
       >
-        <LoaderCircle className="spin-icon" size={15} aria-hidden="true" />
-      </span>
+        <span className="indicator-running-container">
+          <LoaderCircle className="spin-icon default-icon" size={15} aria-hidden="true" />
+          <X className="stop-icon" size={15} aria-hidden="true" />
+        </span>
+      </button>
+    );
+  }
+
+  // If the pipeline is not running and this stage is ready to be run, show Play icon on hover
+  if (!isRunningAny && isReady) {
+    const playTooltip = status === "pending" ? "启动该阶段诊断" : "重新启动该阶段诊断";
+    return (
+      <button
+        className={`workflow-node-status-indicator workflow-node-status-indicator-${status} interactive-status-btn`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onStartStage(stage);
+        }}
+        aria-label={playTooltip}
+        title={playTooltip}
+        type="button"
+      >
+        <span className="indicator-play-container">
+          <span className="default-icon flex items-center justify-center">
+            {status === "done" && <CheckCircle2 size={15} aria-hidden="true" />}
+            {(status === "interrupted" || status === "failed") && <AlertCircle size={15} aria-hidden="true" />}
+            {status === "pending" && <span className="workflow-status-dot" aria-hidden="true" />}
+          </span>
+          <Play className="play-icon" size={11} fill="currentColor" aria-hidden="true" />
+        </span>
+      </button>
     );
   }
 
@@ -793,6 +950,18 @@ function StageStatusIndicator({ status, label }: { status: StageStatus; label: s
         title={label}
       >
         <CheckCircle2 size={15} aria-hidden="true" />
+      </span>
+    );
+  }
+
+  if (status === "interrupted" || status === "failed") {
+    return (
+      <span
+        className={`workflow-node-status-indicator workflow-node-status-indicator-${status}`}
+        aria-label={label}
+        title={label}
+      >
+        <AlertCircle size={15} aria-hidden="true" />
       </span>
     );
   }
@@ -833,6 +1002,9 @@ type WorkflowTimelineProps = {
   stageStatus: Record<StageName, StageStatus>;
   stageStreams: Partial<Record<StageName, StageLiveState>>;
   onOpenStageDetails: (stage: StageName) => void;
+  onStartStage: (stage: StageName) => void;
+  onInterrupt: () => void;
+  isRunningAny: boolean;
 };
 
 const WorkflowTimeline = memo(function WorkflowTimeline({
@@ -841,10 +1013,14 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
   stageStatus,
   stageStreams,
   onOpenStageDetails,
+  onStartStage,
+  onInterrupt,
+  isRunningAny,
 }: WorkflowTimelineProps) {
   const getLiveState = (stage: StageName) => stageStreams[stage] ?? EMPTY_STAGE_LIVE_STATE;
   const getStatus = (stage: StageName) => stageStatus[stage];
   const hasResult = (stage: StageName) => Boolean(stagePayloads[stage]);
+  const isReady = (stage: StageName) => isStageReadyToRun(stage, stagePayloads);
 
   return (
     <div className="workflow-flowchart" aria-label="Resume review workflow flowchart">
@@ -858,6 +1034,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("resume_loader")}
           liveState={getLiveState("resume_loader")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("resume_loader")}
         />
       </div>
 
@@ -878,6 +1058,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("resume_parser")}
           liveState={getLiveState("resume_parser")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("resume_parser")}
         />
       </div>
 
@@ -899,6 +1083,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("hr_agent")}
           liveState={getLiveState("hr_agent")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("hr_agent")}
         />
         <StageWorkflowCard
           stage="interviewer_agent"
@@ -908,6 +1096,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("interviewer_agent")}
           liveState={getLiveState("interviewer_agent")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("interviewer_agent")}
         />
         <StageWorkflowCard
           stage="career_master_agent"
@@ -917,6 +1109,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("career_master_agent")}
           liveState={getLiveState("career_master_agent")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("career_master_agent")}
         />
       </div>
 
@@ -938,6 +1134,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("summary_agent")}
           liveState={getLiveState("summary_agent")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("summary_agent")}
         />
       </div>
 
@@ -956,6 +1156,10 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
           status={getStatus("rewrite_agent")}
           liveState={getLiveState("rewrite_agent")}
           onOpenStageDetails={onOpenStageDetails}
+          onStartStage={onStartStage}
+          onInterrupt={onInterrupt}
+          isRunningAny={isRunningAny}
+          isReady={isReady("rewrite_agent")}
         />
       </div>
     </div>
@@ -967,6 +1171,15 @@ function areWorkflowTimelinePropsEqual(previous: WorkflowTimelineProps, next: Wo
     return false;
   }
   if (previous.onOpenStageDetails !== next.onOpenStageDetails) {
+    return false;
+  }
+  if (previous.onStartStage !== next.onStartStage) {
+    return false;
+  }
+  if (previous.onInterrupt !== next.onInterrupt) {
+    return false;
+  }
+  if (previous.isRunningAny !== next.isRunningAny) {
     return false;
   }
 
@@ -1005,7 +1218,7 @@ function LiveConsole({
     }, 50);
 
     return () => window.clearTimeout(scrollTimer);
-  }, [logs.length, liveState.reasoning, liveState.output]);
+  }, [logs.length, null, null]);
 
   const wasRunning = useRef(false);
   if (status === "running" && !wasRunning.current) {
@@ -1035,7 +1248,7 @@ function LiveConsole({
           )}
         </span>
         <span className="console-header-right">
-          <span className="console-log-count">{logs.length} 条实时事件</span>
+          <span className="console-log-count">{logs.length} 条轻量事件</span>
           {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </span>
       </button>
@@ -1061,7 +1274,7 @@ function LiveConsole({
           {/* Console logger */}
           <div className="console-log-screen" ref={scrollRef}>
             {logs.length === 0 ? (
-              <p className="console-placeholder-text">等待评审任务启动，此终端将输出 Agent 的流式决策、模型思考与分析数据...</p>
+              <p className="console-placeholder-text">等待评审任务启动，此处只显示阶段状态与心跳，不渲染模型原文。</p>
             ) : (
               <div className="console-logs-list">
                 {logs.map((log, index) => (
@@ -1071,28 +1284,6 @@ function LiveConsole({
                     <span className="log-msg">{log.message}</span>
                   </div>
                 ))}
-
-                {/* Reasoning Box */}
-                {liveState.reasoning && (
-                  <div className="console-stream-section reasoning-section">
-                    <div className="stream-section-title">
-                      <span className="stream-section-dot pulsing" />
-                      <span>AI 深度协同思考链条轨迹 (Chain of Thought Trail)</span>
-                    </div>
-                    <pre className="stream-content">{liveState.reasoning}</pre>
-                  </div>
-                )}
-
-                {/* Stream Chunks output */}
-                {liveState.output && (
-                  <div className="console-stream-section output-section">
-                    <div className="stream-section-title">
-                      <span className="stream-section-dot" />
-                      <span>流式结构化输出段 (Model Raw Output Snippets)</span>
-                    </div>
-                    <pre className="stream-content">{liveState.output}</pre>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1992,6 +2183,8 @@ function ResultExplorer({
   const Icon = meta.icon;
   const liveState = stageStreams[selectedStage] ?? EMPTY_STAGE_LIVE_STATE;
   const status = stageStatus[selectedStage];
+  const [isResultExpanded, setIsResultExpanded] = useState(true);
+  const payload = stagePayloads[selectedStage];
 
   return (
     <div className="node-result-layout" key={selectedStage}>
@@ -2011,12 +2204,44 @@ function ResultExplorer({
       </header>
 
       <div className="result-viewer">
-        <div className="structured-panel-wrapper">
-          <StageResultContent
-            finalResult={selectedStage === "summary_agent" ? finalResult : null}
-            payload={stagePayloads[selectedStage]}
-            stage={selectedStage}
-          />
+        <LiveConsole stage={selectedStage} liveState={liveState} status={status} />
+        
+        <div className={`live-console-box ${status === "done" ? "is-done" : ""} ${isResultExpanded ? "is-expanded" : "is-collapsed"}`}>
+          <button
+            type="button"
+            className="live-console-header"
+            onClick={() => setIsResultExpanded(!isResultExpanded)}
+            style={{ width: "100%", borderBottom: isResultExpanded ? "1px solid var(--line)" : "none", textAlign: "left" }}
+          >
+            <span className="console-header-left" style={{ color: payload ? "var(--green)" : "var(--cyan)" }}>
+              <FileText size={15} />
+              <strong>{meta.label} 诊断分析报告 & 优化结果</strong>
+              {status === "done" && (
+                <span className="running-dot-wrapper" style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "99px", padding: "1px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <span className="phase-indicator-dot" style={{ background: "var(--green)", width: "6px", height: "6px", borderRadius: "50%", display: "inline-block" }} />
+                  <span className="console-running-text" style={{ color: "var(--green)", fontSize: "0.7rem", fontWeight: "600" }}>诊断就绪</span>
+                </span>
+              )}
+            </span>
+            <span className="console-header-right">
+              <span className="console-log-count" style={{ color: "var(--text-dim)" }}>
+                {payload ? "已生成结构化结果" : "等待数据载入"}
+              </span>
+              {isResultExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </span>
+          </button>
+
+          {isResultExpanded && (
+            <div className="live-console-body" style={{ background: "transparent", padding: "14px" }}>
+              <div className="structured-panel-wrapper" style={{ border: "none", padding: 0, background: "transparent" }}>
+                <StageResultContent
+                  finalResult={selectedStage === "summary_agent" ? finalResult : null}
+                  payload={stagePayloads[selectedStage]}
+                  stage={selectedStage}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -2083,6 +2308,8 @@ export function ReviewStudio({
   onSessionChanged?: () => void;
 }) {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [cachedResumeFileName, setCachedResumeFileName] = useState("");
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [targetRole, setTargetRole] = useState("");
   const [targetDescription, setTargetDescription] = useState("");
   const [targetRoleDraft, setTargetRoleDraft] = useState("");
@@ -2117,6 +2344,8 @@ export function ReviewStudio({
   const phaseTimelineRef = useRef<Partial<Record<StageName, ReviewStageProgressPhase>>>({});
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestAbortControllerRef = useRef<AbortController | null>(null);
+  const ownerKey = getReviewOwnerKey(identity);
   const isGuest = identity?.kind === "guest";
   const guestRemainingTrialCount = isGuest ? identity.guest.remainingTrialCount : 0;
   const isBlocked =
@@ -2125,16 +2354,121 @@ export function ReviewStudio({
       : identity?.kind === "guest"
         ? identity.guest.status !== "ACTIVE"
         : true;
-  const canRunReview =
-    !!identity &&
-    !isBlocked &&
-    (identity.kind === "user" || identity.guest.remainingTrialCount > 0);
   const identityLabel =
     identity?.kind === "user"
       ? `${identity.user.username} · ${identity.user.role === "ADMIN" ? "管理员" : "正式成员"}`
       : identity?.kind === "guest"
         ? `游客试用 · 剩余 ${guestRemainingTrialCount} 次`
         : "未登录";
+  const hasLocalCheckpoint = hasReusableReviewState(stagePayloads);
+  const canResumeLocalRun = Boolean(currentRunId && hasLocalCheckpoint && !finalResult && !resumeFile);
+  const canRunReview =
+    !!identity &&
+    !isBlocked &&
+    (identity.kind === "user" || identity.guest.remainingTrialCount > 0 || canResumeLocalRun);
+  const uploadLabel = resumeFile
+    ? resumeFile.name
+    : cachedResumeFileName
+      ? `${cachedResumeFileName} (本地断点)`
+      : "选择简历源文件";
+  const primaryActionLabel = isRunning ? "专家团诊断中..." : canResumeLocalRun ? "继续诊断" : "启动简历诊断";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadLocalReviewRun(ownerKey)
+      .then((snapshot) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (!snapshot) {
+          setCurrentRunId(null);
+          setCachedResumeFileName("");
+          setRunningStages([]);
+          setStageStatus(createInitialStageStatus());
+          setStageStreams({});
+          setStagePayloads({});
+          setFinalResult(null);
+          setSelectedStage("resume_loader");
+          return;
+        }
+
+        const restoredStatus = interruptRunningStages(
+          snapshot.stageStatus as Record<StageName, StageStatus>,
+        ) as Record<StageName, StageStatus>;
+
+        setCurrentRunId(snapshot.runId);
+        setCachedResumeFileName(snapshot.resumeFileName);
+        setResumeFile(null);
+        setTargetRole(snapshot.targetRole);
+        setTargetDescription(snapshot.targetDescription);
+        setTargetRoleDraft(snapshot.targetRole);
+        setTargetDescriptionDraft(snapshot.targetDescription);
+        setStageStatus(restoredStatus);
+        setStagePayloads(snapshot.stagePayloads as Partial<Record<StageName, unknown>>);
+        setStageStreams(sanitizeStageStreams(snapshot.stageStreams as Partial<Record<StageName, unknown>>));
+        let finalResult = snapshot.finalResult;
+        if (!finalResult && snapshot.stagePayloads.rewrite_agent) {
+          finalResult = tryReconstructReviewRunResult({
+            targetRole: snapshot.targetRole,
+            targetDescription: snapshot.targetDescription,
+            stagePayloads: snapshot.stagePayloads,
+          });
+        }
+
+        setFinalResult(finalResult);
+        setRunningStages([]);
+        setIsRunning(false);
+        setSelectedStage(firstActiveStage(restoredStatus));
+        setDetailsStage(null);
+
+        if (!finalResult && hasReusableReviewState(snapshot.stagePayloads)) {
+          setErrorMessage("已恢复上次本地断点，可点击继续诊断。");
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerKey]);
+
+  useEffect(() => {
+    if (!currentRunId) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      const snapshot: LocalReviewRunSnapshot = {
+        ownerKey,
+        runId: currentRunId,
+        resumeFileName: resumeFile?.name || cachedResumeFileName || "cached-resume.txt",
+        targetRole,
+        targetDescription,
+        stageStatus,
+        stagePayloads,
+        stageStreams: sanitizeStageStreams(stageStreams),
+        finalResult,
+        updatedAt: Date.now(),
+      };
+
+      void saveLocalReviewRun(snapshot).catch(() => undefined);
+    }, 250);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [
+    cachedResumeFileName,
+    currentRunId,
+    finalResult,
+    ownerKey,
+    resumeFile?.name,
+    stagePayloads,
+    stageStatus,
+    stageStreams,
+    targetDescription,
+    targetRole,
+  ]);
 
   const handleLogout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -2175,6 +2509,7 @@ export function ReviewStudio({
       if (progressFlushTimerRef.current) {
         clearTimeout(progressFlushTimerRef.current);
       }
+      requestAbortControllerRef.current?.abort();
     },
     [],
   );
@@ -2228,8 +2563,14 @@ export function ReviewStudio({
         try {
           chunk = parseChunkLine(line);
         } catch {
-          setErrorMessage("流式响应解析失败，请检查模型输出格式。");
+          if (line.startsWith("<!DOCTYPE") || line.startsWith("<html") || line.includes("Gateway Timeout") || line.includes("Internal Server Error")) {
+            setErrorMessage("服务器网络超时或发生内部错误，诊断已被中断，请重试。");
+          } else {
+            setErrorMessage(`流式响应解析失败: ${line.slice(0, 100)}`);
+          }
+          setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
           setIsRunning(false);
+          requestAbortControllerRef.current = null;
           continue;
         }
         if (chunk.type === "event") {
@@ -2241,11 +2582,15 @@ export function ReviewStudio({
           setFinalResult(chunk.result);
           setSelectedStage("rewrite_agent");
           setIsRunning(false);
+          requestAbortControllerRef.current = null;
           onSessionChanged?.();
           continue;
         }
+        flushPendingProgressEvents();
+        setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
         setErrorMessage(chunk.message);
         setIsRunning(false);
+        requestAbortControllerRef.current = null;
         onSessionChanged?.();
       }
 
@@ -2281,6 +2626,25 @@ export function ReviewStudio({
       }));
 
       const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      const initialLogs: StageLogEntry[] = [
+        {
+          timestamp,
+          phase: null,
+          message: event.message,
+          type: "info"
+        }
+      ];
+      if (event.details && event.details.length > 0) {
+        event.details.forEach((detail) => {
+          initialLogs.push({
+            timestamp,
+            phase: null,
+            message: `[数据载入] ${detail}`,
+            type: "info"
+          });
+        });
+      }
+
       setStageStreams((previous) => ({
         ...previous,
         [stage]: {
@@ -2288,14 +2652,7 @@ export function ReviewStudio({
           latestMessage: event.message,
           details: event.details,
           phase: null,
-          logs: [
-            {
-              timestamp,
-              phase: null,
-              message: event.message,
-              type: "info"
-            }
-          ]
+          logs: initialLogs
         },
       }));
       setSelectedStage(stage);
@@ -2347,8 +2704,167 @@ export function ReviewStudio({
       flushPendingProgressEvents();
       setRunningStages([]);
       setIsRunning(false);
+      requestAbortControllerRef.current = null;
     }
   }
+
+  const handleInterruptReview = useCallback(() => {
+    requestAbortControllerRef.current?.abort();
+    requestAbortControllerRef.current = null;
+    flushPendingProgressEvents();
+    setRunningStages([]);
+    setStageStatus((previous) => interruptRunningStages(previous) as Record<StageName, StageStatus>);
+    setIsRunning(false);
+    setErrorMessage("已中断诊断，可点击继续诊断从本地断点重试。");
+  }, [flushPendingProgressEvents]);
+
+  const executeReview = useCallback(async (opts: {
+    payloads: Partial<Record<StageName, unknown>>;
+    status: Record<StageName, StageStatus>;
+    finalResult: ReviewRunResult | null;
+    startStage: StageName;
+  }) => {
+    const abortController = new AbortController();
+    requestAbortControllerRef.current = abortController;
+
+    const isResumingLocalRun = Boolean(opts.payloads.resume_loader);
+    const nextRunId = isResumingLocalRun && currentRunId ? currentRunId : createReviewRunId();
+
+    setErrorMessage("");
+    setIsRunning(true);
+    setRunningStages([]);
+    setCurrentRunId(nextRunId);
+
+    if (resumeFile) {
+      setCachedResumeFileName(resumeFile.name);
+    }
+
+    phaseTimelineRef.current = {};
+    pendingProgressEventsRef.current = [];
+    if (progressFlushTimerRef.current) {
+      clearTimeout(progressFlushTimerRef.current);
+      progressFlushTimerRef.current = null;
+    }
+
+    const formData = new FormData();
+    if (resumeFile && !isResumingLocalRun) {
+      formData.append("resumeFile", resumeFile);
+    }
+    formData.append("targetRole", targetRole.trim());
+    formData.append("targetDescription", targetDescription.trim());
+    if (isResumingLocalRun) {
+      formData.append("resumeState", JSON.stringify(buildReviewResumeState({ stagePayloads: opts.payloads, finalResult: opts.finalResult })));
+    }
+
+    try {
+      const response = await fetch("/api/review", {
+        method: "POST",
+        body: formData,
+        signal: abortController.signal,
+      });
+      if (!response.ok) {
+        let errorMsg = `诊断请求失败 (${response.status})`;
+        try {
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const errData = await response.json();
+            if (errData && typeof errData.message === "string") {
+              errorMsg = errData.message;
+            }
+          } else {
+            const text = await response.text();
+            if (text && text.length < 200) {
+              errorMsg = text;
+            }
+          }
+        } catch {}
+        throw new Error(errorMsg);
+      }
+      await handleChunkStream(response);
+    } catch (error) {
+      flushPendingProgressEvents();
+      const wasAborted =
+        abortController.signal.aborted ||
+        (error instanceof DOMException && error.name === "AbortError");
+      setStageStatus((previous) =>
+        (wasAborted ? interruptRunningStages(previous) : failRunningStages(previous)) as Record<StageName, StageStatus>,
+      );
+      setRunningStages([]);
+      setErrorMessage(
+        wasAborted
+          ? "已中断诊断，可点击继续诊断从本地断点重试。"
+          : error instanceof Error
+            ? error.message
+            : "Review request failed.",
+      );
+      setIsRunning(false);
+      requestAbortControllerRef.current = null;
+    }
+  }, [
+    currentRunId,
+    resumeFile,
+    targetRole,
+    targetDescription,
+    handleChunkStream,
+    flushPendingProgressEvents
+  ]);
+
+  const handleStartStage = useCallback(async (stage: StageName) => {
+    if (isRunning) return;
+
+    if (!canRunReview) {
+      setErrorMessage(isGuest ? "游客试用次数已用完，请登录正式账号。" : "当前身份无权启动诊断。");
+      return;
+    }
+    if (!targetRole.trim()) {
+      setErrorMessage("请先配置目标岗位。");
+      setTargetRoleDraft(targetRole);
+      setTargetDescriptionDraft(targetDescription);
+      setIsTargetJobOpen(true);
+      return;
+    }
+
+    const resetStages = getStagesToReset(stage);
+    const nextPayloads = { ...stagePayloads };
+    const nextStatus = { ...stageStatus };
+    const nextStreams = { ...stageStreams };
+
+    resetStages.forEach((s) => {
+      delete nextPayloads[s];
+      nextStatus[s] = "pending";
+      delete nextStreams[s];
+    });
+
+    let nextFinalResult = finalResult;
+    if (resetStages.includes("summary_agent") || resetStages.includes("rewrite_agent")) {
+      nextFinalResult = null;
+    }
+
+    setStagePayloads(nextPayloads);
+    setStageStatus(nextStatus);
+    setStageStreams(nextStreams);
+    setFinalResult(nextFinalResult);
+    setSelectedStage(stage);
+    setDetailsStage(null);
+
+    await executeReview({
+      payloads: nextPayloads,
+      status: nextStatus,
+      finalResult: nextFinalResult,
+      startStage: stage,
+    });
+  }, [
+    canRunReview,
+    targetRole,
+    targetDescription,
+    stagePayloads,
+    stageStatus,
+    stageStreams,
+    finalResult,
+    isRunning,
+    isGuest,
+    executeReview
+  ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2357,7 +2873,9 @@ export function ReviewStudio({
       setErrorMessage(isGuest ? "游客试用次数已用完，请登录正式账号。" : "当前身份无权启动诊断。");
       return;
     }
-    if (!resumeFile) {
+    const isResumingLocalRun = !resumeFile && hasLocalCheckpoint;
+
+    if (!resumeFile && !isResumingLocalRun) {
       setErrorMessage("请先上传简历文件。");
       return;
     }
@@ -2369,38 +2887,34 @@ export function ReviewStudio({
       return;
     }
 
-    setErrorMessage("");
-    setIsRunning(true);
-    setRunningStages([]);
-    setTimeline([]);
-    setStageStreams({});
-    setStagePayloads({});
-    setFinalResult(null);
-    setStageStatus(createInitialStageStatus());
-    setSelectedStage("resume_loader");
+    let startStage: StageName = "resume_loader";
+    let nextPayloads = { ...stagePayloads };
+    let nextStatus = { ...stageStatus };
+    let nextFinalResult = finalResult;
+
+    if (isResumingLocalRun) {
+      startStage = firstActiveStage(stageStatus);
+      nextStatus = interruptRunningStages(stageStatus) as Record<StageName, StageStatus>;
+      setSelectedStage(startStage);
+    } else {
+      nextPayloads = {};
+      nextStatus = createInitialStageStatus();
+      nextFinalResult = null;
+      setTimeline([]);
+      setStageStreams({});
+      setStagePayloads({});
+      setFinalResult(null);
+      setStageStatus(nextStatus);
+      setSelectedStage("resume_loader");
+    }
     setDetailsStage(null);
-    phaseTimelineRef.current = {};
-    pendingProgressEventsRef.current = [];
-    if (progressFlushTimerRef.current) {
-      clearTimeout(progressFlushTimerRef.current);
-      progressFlushTimerRef.current = null;
-    }
 
-    const formData = new FormData();
-    formData.append("resumeFile", resumeFile);
-    formData.append("targetRole", targetRole.trim());
-    formData.append("targetDescription", targetDescription.trim());
-
-    try {
-      const response = await fetch("/api/review", {
-        method: "POST",
-        body: formData,
-      });
-      await handleChunkStream(response);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Review request failed.");
-      setIsRunning(false);
-    }
+    await executeReview({
+      payloads: nextPayloads,
+      status: nextStatus,
+      finalResult: nextFinalResult,
+      startStage,
+    });
   }
 
   return (
@@ -2423,10 +2937,18 @@ export function ReviewStudio({
             <input
               type="file"
               accept=".txt,.md,.pdf,.docx"
-              onChange={(event) => setResumeFile(event.currentTarget.files?.[0] ?? null)}
+              onChange={(event) => {
+                const nextFile = event.currentTarget.files?.[0] ?? null;
+                setResumeFile(nextFile);
+                if (nextFile) {
+                  setCachedResumeFileName(nextFile.name);
+                  setCurrentRunId(null);
+                  setErrorMessage("");
+                }
+              }}
             />
             <Upload size={17} />
-            <span>{resumeFile ? resumeFile.name : "选择简历源文件"}</span>
+            <span>{uploadLabel}</span>
           </label>
 
           <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
@@ -2492,7 +3014,7 @@ export function ReviewStudio({
 
           <button className="primary-action" type="submit" disabled={isRunning || !canRunReview}>
             {isRunning ? <LoaderCircle className="spin-icon" size={17} /> : <Play size={17} />}
-            {isRunning ? "专家团诊断中..." : "启动简历诊断"}
+            {primaryActionLabel}
           </button>
         </form>
       </header>
@@ -2512,6 +3034,9 @@ export function ReviewStudio({
             stageStatus={stageStatus}
             stageStreams={stageStreams}
             onOpenStageDetails={handleOpenStageDetails}
+            onStartStage={handleStartStage}
+            onInterrupt={handleInterruptReview}
+            isRunningAny={isRunning}
           />
         </aside>
 

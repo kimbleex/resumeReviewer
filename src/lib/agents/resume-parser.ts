@@ -27,6 +27,7 @@ function mergeHints(profile: ResumeProfile, hints: ResumeSignalHints): ResumePro
 export async function runResumeParser(
   document: ResumeDocument,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<ResumeProfile> {
   const hints = extractResumeSignals(document.content);
 
@@ -36,6 +37,7 @@ export async function runResumeParser(
     responseFormat: resumeProfileResponseFormatSchema,
     normalize: (value) => resumeProfileSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请解析这份简历，并输出完整的结构化简历画像。
 简历来源：${document.path}

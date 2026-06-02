@@ -243,6 +243,103 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
         event.phase === "validating_output",
     ),
   );
+  assert.ok(
+    events
+      .filter((event) => event.kind === "stage_progress")
+      .every((event) => event.snippet === "" && event.payload === null),
+    "stage progress events should not expose raw LLM output to the frontend",
+  );
+});
+
+test("runReviewPipeline forwards abort signal to each agent executor", async () => {
+  const resumeFile = new File(["Platform engineer"], "resume.txt", {
+    type: "text/plain",
+  });
+  const targetJob: TargetJob = { title: "Platform Engineer", description: "" };
+  const abortController = new AbortController();
+  let parserSignal: AbortSignal | undefined;
+  let reviewerSignal: AbortSignal | undefined;
+  let summarySignal: AbortSignal | undefined;
+  let rewriteSignal: AbortSignal | undefined;
+
+  const document: ResumeDocument = {
+    path: "upload://resume.txt",
+    fileType: "txt",
+    content: "Platform engineer",
+  };
+  const profile: ResumeProfile = {
+    candidateName: "Taylor",
+    personalInfo: { name: "Taylor", age: "", phone: "", email: "", location: "", links: [] },
+    headline: "Platform Engineer",
+    targetRoles: ["Platform Engineer"],
+    yearsOfExperience: "4 years",
+    coreSkills: ["TypeScript"],
+    skillGroups: [],
+    workExperiences: [],
+    projects: [],
+    educationRecords: [],
+    strengths: [],
+    risks: [],
+    missingInformation: [],
+    reasoningSummary: [],
+  };
+  const feedback: ReviewerFeedback = {
+    agentName: "hr_agent",
+    perspective: "HR",
+    overallScore: 82,
+    reasoningSummary: [],
+    strengths: [],
+    concerns: [],
+    scoreBreakdown: [],
+    suggestions: [],
+  };
+
+  await runReviewPipeline(
+    { resumeFile, targetJob },
+    undefined,
+    {
+      loadResume: async () => document,
+      runResumeParser: async (_document, _onProgress, abortSignal) => {
+        parserSignal = abortSignal;
+        return profile;
+      },
+      reviewerAgents: [
+        {
+          name: "hr_agent",
+          perspective: "HR",
+          run: async (_document, _profile, _targetJob, _onProgress, abortSignal) => {
+            reviewerSignal = abortSignal;
+            return feedback;
+          },
+        },
+      ],
+      runSummary: async (_document, _profile, _feedback, _targetJob, _onProgress, abortSignal) => {
+        summarySignal = abortSignal;
+        return {
+          overallScore: 82,
+          readyLevel: "promising",
+          executiveSummary: "Solid baseline resume.",
+          reasoningSummary: [],
+          topPriorities: [],
+          scoreBreakdown: [],
+          sectionRevisions: [],
+        };
+      },
+      runRewrite: async (_document, _profile, _feedback, _finalReview, _targetJob, _onProgress, abortSignal) => {
+        rewriteSignal = abortSignal;
+        return {
+          rewrittenContent: "# Taylor\n\nRewritten resume content.",
+          explanation: "Applied final review guidance.",
+        };
+      },
+    },
+    { abortSignal: abortController.signal },
+  );
+
+  assert.equal(parserSignal, abortController.signal);
+  assert.equal(reviewerSignal, abortController.signal);
+  assert.equal(summarySignal, abortController.signal);
+  assert.equal(rewriteSignal, abortController.signal);
 });
 
 test("runReviewPipeline forwards target job context to reviewer and summary agents", async () => {
@@ -332,4 +429,127 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
   assert.deepEqual(reviewerContexts, [targetJob]);
   assert.deepEqual(summaryContext, targetJob);
   assert.deepEqual(rewriteContext, targetJob);
+});
+
+test("runReviewPipeline resumes from completed stage payloads and only reruns missing reviewers onward", async () => {
+  const events: Array<{ kind: string; stage: string; message: string }> = [];
+  const resumeFile = new File(["Ignored because document is cached"], "resume.txt", {
+    type: "text/plain",
+  });
+  const targetJob: TargetJob = { title: "RPA Engineer", description: "" };
+  const document: ResumeDocument = {
+    path: "upload://cached.txt",
+    fileType: "txt",
+    content: "Cached resume text",
+  };
+  const profile: ResumeProfile = {
+    candidateName: "Casey",
+    personalInfo: { name: "Casey", age: "", phone: "", email: "", location: "", links: [] },
+    headline: "RPA Engineer",
+    targetRoles: ["RPA Engineer"],
+    yearsOfExperience: "3 years",
+    coreSkills: ["RPA"],
+    skillGroups: [],
+    workExperiences: [],
+    projects: [],
+    educationRecords: [],
+    strengths: [],
+    risks: [],
+    missingInformation: [],
+    reasoningSummary: ["Cached parser result."],
+  };
+  const cachedHrFeedback: ReviewerFeedback = {
+    agentName: "hr_agent",
+    perspective: "HR",
+    overallScore: 70,
+    reasoningSummary: ["Cached HR result."],
+    strengths: [],
+    concerns: [],
+    scoreBreakdown: [],
+    suggestions: [],
+  };
+  const freshInterviewerFeedback: ReviewerFeedback = {
+    agentName: "interviewer_agent",
+    perspective: "Interviewer",
+    overallScore: 76,
+    reasoningSummary: ["Fresh interviewer result."],
+    strengths: [],
+    concerns: [],
+    scoreBreakdown: [],
+    suggestions: [],
+  };
+  const freshCareerFeedback: ReviewerFeedback = {
+    agentName: "career_master_agent",
+    perspective: "Career Master",
+    overallScore: 78,
+    reasoningSummary: ["Fresh career result."],
+    strengths: [],
+    concerns: [],
+    scoreBreakdown: [],
+    suggestions: [],
+  };
+  let summaryFeedbackNames: string[] = [];
+
+  const result = await runReviewPipeline(
+    { resumeFile, targetJob },
+    (event) => {
+      events.push({ kind: event.kind, stage: event.stage, message: event.message });
+    },
+    {
+      loadResume: async () => {
+        throw new Error("loader should be skipped");
+      },
+      runResumeParser: async () => {
+        throw new Error("parser should be skipped");
+      },
+      reviewerAgents: [
+        {
+          name: "hr_agent",
+          perspective: "HR",
+          run: async () => {
+            throw new Error("cached HR reviewer should be skipped");
+          },
+        },
+        { name: "interviewer_agent", perspective: "Interviewer", run: async () => freshInterviewerFeedback },
+        { name: "career_master_agent", perspective: "Career Master", run: async () => freshCareerFeedback },
+      ],
+      runSummary: async (_document, _profile, feedback) => {
+        summaryFeedbackNames = feedback.map((item) => item.agentName);
+        return {
+          overallScore: 80,
+          readyLevel: "promising",
+          executiveSummary: "Resumed run completed.",
+          reasoningSummary: [],
+          topPriorities: [],
+          scoreBreakdown: [],
+          sectionRevisions: [],
+        };
+      },
+      runRewrite: async () => ({
+        rewrittenContent: "# Casey\n\nRewritten resume content.",
+        explanation: "Applied resumed review guidance.",
+      }),
+    },
+    {
+      resumeState: {
+        document,
+        profile,
+        reviewerFeedback: {
+          hr_agent: cachedHrFeedback,
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(summaryFeedbackNames, ["hr_agent", "interviewer_agent", "career_master_agent"]);
+  assert.deepEqual(result.reviewerFeedback.map((item) => item.agentName), summaryFeedbackNames);
+  assert.ok(
+    events.some((event) => event.kind === "stage_completed" && event.stage === "resume_loader" && /复用/.test(event.message)),
+  );
+  assert.ok(
+    events.some((event) => event.kind === "stage_completed" && event.stage === "resume_parser" && /复用/.test(event.message)),
+  );
+  assert.ok(events.some((event) => event.kind === "stage_completed" && event.stage === "hr_agent" && /复用/.test(event.message)));
+  assert.ok(events.some((event) => event.kind === "stage_started" && event.stage === "interviewer_agent"));
+  assert.ok(events.some((event) => event.kind === "stage_started" && event.stage === "career_master_agent"));
 });

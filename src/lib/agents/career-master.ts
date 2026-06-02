@@ -14,6 +14,7 @@ export async function runCareerMasterReviewer(
   profile: ResumeProfile,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
     name: "career_master_agent",
@@ -21,6 +22,7 @@ export async function runCareerMasterReviewer(
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请从职业定位、行业竞争力和长期叙事视角审阅这份简历。
 

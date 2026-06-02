@@ -16,6 +16,7 @@ export async function runSummaryAgent(
   reviewerFeedback: ReviewerFeedback[],
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<FinalResumeReview> {
   return invokeStructuredAgent({
     name: "summary_agent",
@@ -23,6 +24,7 @@ export async function runSummaryAgent(
     responseFormat: finalResumeReviewResponseFormatSchema,
     normalize: (value) => finalResumeReviewSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请整合下面这些结构化结果，输出最终简历修改方案。
 

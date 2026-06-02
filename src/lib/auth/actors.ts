@@ -94,7 +94,10 @@ export async function resolveGuest(request: NextRequest | Request) {
   return { ok: true as const, guest };
 }
 
-export async function resolveReviewActor(request: NextRequest | Request) {
+export async function resolveReviewActor(
+  request: NextRequest | Request,
+  options: { allowExhaustedGuest?: boolean } = {},
+) {
   const userSession = await resolveUserSession(request);
   if (userSession.ok) {
     return {
@@ -109,7 +112,7 @@ export async function resolveReviewActor(request: NextRequest | Request) {
   }
 
   const decision = canUseGuestTrial(guestSession.guest);
-  if (!decision.ok) {
+  if (!decision.ok && !(options.allowExhaustedGuest && decision.reason === "GUEST_TRIAL_EXHAUSTED")) {
     return { ok: false as const, reason: decision.reason };
   }
 

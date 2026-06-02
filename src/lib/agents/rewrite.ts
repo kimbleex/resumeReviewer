@@ -18,6 +18,7 @@ export async function runRewriteAgent(
   finalReview: FinalResumeReview,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<ResumeRewrite> {
   return invokeStructuredAgent({
     name: "rewrite_agent",
@@ -25,6 +26,7 @@ export async function runRewriteAgent(
     responseFormat: resumeRewriteResponseFormatSchema,
     normalize: (value) => resumeRewriteSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请结合所有的多 Agent 评审意见与最终修改意见，为候选人深度改写、优化并生成一份全新的 Markdown 格式简历。
 

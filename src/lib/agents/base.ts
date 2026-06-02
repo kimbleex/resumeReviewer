@@ -17,6 +17,23 @@ export type StructuredAgentProgress = {
   payload?: unknown;
 };
 
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getStructuredAgentTimeout() {
+  return {
+    totalMs: readPositiveIntegerEnv("AGENT_TOTAL_TIMEOUT_MS", 180_000),
+    chunkMs: readPositiveIntegerEnv("AGENT_CHUNK_TIMEOUT_MS", 90_000),
+  };
+}
+
 export function createStructuredAgentProgressTracker(options: {
   name: string;
   onProgress?: (event: StructuredAgentProgress) => void;
@@ -27,14 +44,11 @@ export function createStructuredAgentProgressTracker(options: {
   let activePhase: StructuredAgentPhase = "requesting_model";
   let hasReasoningStarted = false;
   let hasOutputStreamed = false;
-  let lastPartialSignature = "";
 
   const emitProgress = (event: StructuredAgentProgress) => {
     activePhase = event.phase;
     options.onProgress?.(event);
   };
-
-  const compactJson = (value: unknown) => JSON.stringify(value, null, 2).slice(0, 1200);
 
   return {
     start() {
@@ -64,27 +78,25 @@ export function createStructuredAgentProgressTracker(options: {
         return;
       }
 
-      const isFirstOutput = !hasOutputStreamed;
-      hasOutputStreamed = true;
-      emitProgress({
-        phase: "streaming_output",
-        message: isFirstOutput ? "模型思考已完成，开始生成结构化诊断报告信息体。" : "结构化诊断报告正在持续生成。",
-        snippet: text,
-        payload: { streamType: "output_text" },
-      });
-    },
-    recordPartialOutput(partial: unknown) {
-      const signature = compactJson(partial);
-      if (!signature || signature === lastPartialSignature) {
+      if (hasOutputStreamed) {
         return;
       }
 
-      lastPartialSignature = signature;
+      hasOutputStreamed = true;
       emitProgress({
         phase: "streaming_output",
-        message: "结构化字段正在增量生成。",
-        snippet: `\n[partial_object]\n${signature}\n`,
-        payload: { streamType: "partial_object", partialObject: partial },
+        message: "模型思考已完成，正在生成结构化诊断报告。",
+      });
+    },
+    recordPartialOutput(partial: unknown) {
+      if (hasOutputStreamed || partial === undefined) {
+        return;
+      }
+
+      hasOutputStreamed = true;
+      emitProgress({
+        phase: "streaming_output",
+        message: "模型正在生成结构化字段。",
       });
     },
     emitHeartbeat() {
@@ -118,12 +130,18 @@ function cleanStructuredText(text: string): string {
   return trimmed;
 }
 
-function toErrorMessage(error: unknown): string {
+export function structuredAgentErrorMessage(error: unknown): string {
   if (NoObjectGeneratedError.isInstance(error)) {
     return "模型返回了无法直接解析的结构化结果。";
   }
 
   if (error instanceof Error) {
+    if (/abort/i.test(error.message) || /Abort/i.test(error.name)) {
+      return "诊断已被中断。";
+    }
+    if (/timeout|timed out/i.test(error.message) || /Timeout/i.test(error.name)) {
+      return "模型调用超时，请稍后重试或换一个更快的模型。";
+    }
     if (/Invalid JSON response/i.test(error.message)) {
       return "模型返回了无效 JSON，系统无法完成结构化解析。";
     }
@@ -191,6 +209,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   userContent: string;
   normalize: (value: z.infer<TResponseFormat>) => TResult;
   onProgress?: (event: StructuredAgentProgress) => void;
+  abortSignal?: AbortSignal;
 }): Promise<TResult> {
   let latestPartialValue: DeepPartial<z.infer<TResponseFormat>> | undefined;
   let accumulatedText = "";
@@ -207,6 +226,8 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     model: createLanguageModel(),
     system: options.systemPrompt,
     prompt: options.userContent,
+    abortSignal: options.abortSignal,
+    timeout: getStructuredAgentTimeout(),
     output: Output.object({
       name: options.name,
       schema: options.responseFormat,
@@ -268,7 +289,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     options.onProgress?.({
       phase: "validating_output",
       message: "最终结果校验失败，正在尝试恢复可用结构。",
-      details: [toErrorMessage(error)],
+      details: [structuredAgentErrorMessage(error)],
     });
 
     const recovered = tryRecoverResult({
@@ -288,10 +309,10 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     }
 
     if (streamFailure) {
-      throw new Error(toErrorMessage(streamFailure));
+      throw new Error(structuredAgentErrorMessage(streamFailure));
     }
 
-    throw new Error(toErrorMessage(error));
+    throw new Error(structuredAgentErrorMessage(error));
   } finally {
     clearInterval(heartbeatTimer);
   }

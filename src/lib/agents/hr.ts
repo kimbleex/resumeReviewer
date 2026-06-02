@@ -14,6 +14,7 @@ export async function runHrReviewer(
   profile: ResumeProfile,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
     name: "hr_agent",
@@ -21,6 +22,7 @@ export async function runHrReviewer(
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请从 HR / ATS / 招聘筛选视角审阅这份简历。
 

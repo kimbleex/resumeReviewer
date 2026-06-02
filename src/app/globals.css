@@ -1134,6 +1134,18 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.interrupt-action {
+  height: 38px;
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.interrupt-action:hover {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.11);
+}
+
 .target-job-save {
   border: 1px solid rgba(0, 242, 254, 0.32);
   color: var(--text);
@@ -1496,10 +1508,10 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
 
 .workflow-reviewer-row .workflow-node-status-text {
   font-size: 0.72rem;
+  display: block;
+  width: 100%;
   white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  overflow-wrap: break-word;
   line-height: 1.32;
   min-height: 0;
   overflow: hidden;
@@ -1511,7 +1523,7 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
   align-items: stretch;
   flex: 1;
   min-height: clamp(146px, 19vh, 190px);
-  padding: clamp(18px, 1.8vw, 24px) clamp(52px, 3vw, 62px) clamp(16px, 1.5vw, 22px) clamp(18px, 1.8vw, 24px);
+  padding: clamp(18px, 1.8vw, 24px) clamp(18px, 1.8vw, 24px) clamp(16px, 1.5vw, 22px) clamp(18px, 1.8vw, 24px);
   border: 1px solid rgba(255, 255, 255, 0.05);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.005) 100%), rgba(10, 14, 23, 0.6);
   backdrop-filter: blur(16px);
@@ -1562,6 +1574,16 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
 .workflow-node-running {
   border-color: rgba(245, 158, 11, 0.35);
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(245, 158, 11, 0.01) 100%), rgba(10, 14, 23, 0.75);
+}
+
+.workflow-node-interrupted {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.045) 0%, rgba(245, 158, 11, 0.008) 100%), rgba(10, 14, 23, 0.72);
+}
+
+.workflow-node-failed {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.045) 0%, rgba(248, 113, 113, 0.008) 100%), rgba(10, 14, 23, 0.72);
 }
 
 .workflow-node-done {
@@ -1636,6 +1658,7 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
 
 .workflow-node-content strong {
   max-width: 100%;
+  padding-right: 32px;
   color: #ffffff;
   font-size: clamp(1rem, 1.1vw, 1.2rem);
   font-weight: 750;
@@ -1647,12 +1670,13 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
 .workflow-node-status-text {
   color: var(--text-dim);
   max-width: 100%;
+  padding-right: 0;
   font-size: clamp(0.74rem, 0.8vw, 0.85rem);
   line-height: 1.4;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  display: block;
+  width: 100%;
+  overflow-wrap: break-word;
   white-space: normal;
   opacity: 0.85;
 }
@@ -1700,6 +1724,16 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
 .workflow-node-status-indicator-done {
   color: var(--green);
   filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.45));
+}
+
+.workflow-node-status-indicator-interrupted {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.42));
+}
+
+.workflow-node-status-indicator-failed {
+  color: #f87171;
+  filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.42));
 }
 
 .workflow-node-status-indicator-future {
@@ -3850,4 +3884,76 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* Interactive Status Indicator Action Buttons */
+.interactive-status-btn {
+  cursor: pointer !important;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.interactive-status-btn:hover {
+  transform: scale(1.22);
+}
+
+.indicator-running-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 15px;
+  height: 15px;
+}
+
+.indicator-running-container .stop-icon {
+  display: none;
+}
+
+.interactive-status-btn:hover .indicator-running-container .default-icon {
+  display: none;
+}
+
+.interactive-status-btn:hover .indicator-running-container .stop-icon {
+  display: inline-block;
+  color: var(--red);
+  filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.6));
+}
+
+.indicator-play-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 15px;
+  height: 15px;
+}
+
+.indicator-play-container .play-icon {
+  display: none;
+}
+
+.interactive-status-btn:hover .indicator-play-container .default-icon {
+  display: none;
+}
+
+.interactive-status-btn:hover .indicator-play-container .play-icon {
+  display: inline-block;
+  color: var(--cyan);
+  filter: drop-shadow(0 0 4px rgba(0, 242, 254, 0.8));
+}
+
+
+
+.live-console-box.is-done {
+  border-color: rgba(16, 185, 129, 0.22);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.04);
+}
+
+
+.live-console-box {
+  flex-shrink: 0;
 }

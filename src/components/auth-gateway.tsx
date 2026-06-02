@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { LoaderCircle, LogIn, KeyRound, ArrowRight, ArrowLeft, User, Lock, ShieldAlert, Compass } from "lucide-react";
 
 import { ReviewStudio, type ReviewIdentity } from "@/components/review-studio";
@@ -97,8 +97,16 @@ export function AuthGateway() {
   // Unified visual phase state: false = welcome splash, true = action form card
   const [showForm, setShowForm] = useState(false);
 
+  // Track whether the very first identity fetch has completed.
+  // After that, refreshIdentity will update identity silently in the background
+  // without unmounting ReviewStudio (which would destroy in-flight streams).
+  const hasLoadedOnceRef = useRef(false);
+
   const refreshIdentity = useCallback(async () => {
-    setIsLoading(true);
+    const isInitialLoad = !hasLoadedOnceRef.current;
+    if (isInitialLoad) {
+      setIsLoading(true);
+    }
     try {
       const authResponse = await fetch("/api/auth/me");
       const auth = (await authResponse.json()) as { user: UserSummary | null };
@@ -112,6 +120,7 @@ export function AuthGateway() {
       const guest = (await guestResponse.json()) as { guest: GuestSummary | null };
       setIdentity(guest.guest ? { kind: "guest", guest: guest.guest } : null);
     } finally {
+      hasLoadedOnceRef.current = true;
       setIsLoading(false);
     }
   }, []);

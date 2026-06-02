@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createStructuredAgentProgressTracker, type StructuredAgentProgress } from "./base";
+import {
+  createStructuredAgentProgressTracker,
+  getStructuredAgentTimeout,
+  structuredAgentErrorMessage,
+  type StructuredAgentProgress,
+} from "./base";
 
-test("structured agent progress tracker forwards text deltas and partial object updates", () => {
+test("structured agent progress tracker reports output phase without forwarding raw deltas", () => {
   const events: StructuredAgentProgress[] = [];
   const tracker = createStructuredAgentProgressTracker({
     name: "summary_agent",
@@ -17,15 +22,11 @@ test("structured agent progress tracker forwards text deltas and partial object 
 
   assert.deepEqual(
     events.map((event) => event.phase),
-    ["requesting_model", "model_thinking", "streaming_output", "streaming_output", "streaming_output"],
+    ["requesting_model", "model_thinking", "streaming_output"],
   );
-  assert.deepEqual(
-    events.slice(2).map((event) => event.payload && (event.payload as { streamType?: string }).streamType),
-    ["output_text", "output_text", "partial_object"],
-  );
-  assert.equal(events[2].snippet, "hello");
-  assert.equal(events[3].snippet, " world");
-  assert.match(events[4].snippet ?? "", /executiveSummary/);
+  assert.equal(events[2].snippet, undefined);
+  assert.equal(events[2].payload, undefined);
+  assert.match(events[2].message, /正在生成结构化诊断报告/);
 });
 
 test("structured agent progress tracker emits heartbeat for the active phase", () => {
@@ -45,4 +46,18 @@ test("structured agent progress tracker emits heartbeat for the active phase", (
   assert.equal(heartbeat?.phase, "model_thinking");
   assert.match(heartbeat?.message ?? "", /仍在执行/);
   assert.deepEqual(heartbeat?.details, ["summary_agent 已运行 31 秒"]);
+});
+
+test("structured agent calls have hard total and no-chunk timeouts", () => {
+  assert.deepEqual(getStructuredAgentTimeout(), {
+    totalMs: 180000,
+    chunkMs: 90000,
+  });
+});
+
+test("structured agent timeout errors are shown as actionable Chinese messages", () => {
+  assert.equal(
+    structuredAgentErrorMessage(new Error("streamText timed out after 90000ms")),
+    "模型调用超时，请稍后重试或换一个更快的模型。",
+  );
 });

@@ -14,6 +14,7 @@ export async function runInterviewerReviewer(
   profile: ResumeProfile,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
+  abortSignal?: AbortSignal,
 ): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
     name: "interviewer_agent",
@@ -21,6 +22,7 @@ export async function runInterviewerReviewer(
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
     onProgress,
+    abortSignal,
     userContent: `
 请从技术面试官视角审阅这份简历。
 

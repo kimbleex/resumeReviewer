@@ -12,6 +12,13 @@ function cssRule(selector: string) {
   return match[1];
 }
 
+function exactCssRule(selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = styles.match(new RegExp(`(?:^|\\n)${escapedSelector}\\s*\\{([^}]*)\\}`, "s"));
+  assert.ok(match, `Expected exact CSS rule for ${selector}`);
+  return match[1];
+}
+
 test("review studio shows node details through an on-demand drawer instead of a permanent result pane", () => {
   assert.match(source, /result-drawer-backdrop/);
   assert.match(source, /result-drawer-panel/);
@@ -47,6 +54,19 @@ test("stage detail drawer renders the clicked stage immediately without deferred
   assert.match(source, /key=\{selectedStage\}/);
 });
 
+test("stage detail drawer includes the live agent console for granular progress", () => {
+  assert.match(source, /function LiveConsole/);
+  assert.match(source, /<LiveConsole/);
+});
+
+test("live agent console never stores or renders raw model output text", () => {
+  assert.doesNotMatch(source, /reasoning\?:\s*string/);
+  assert.doesNotMatch(source, /output\?:\s*string/);
+  assert.doesNotMatch(source, /stream-content/);
+  assert.doesNotMatch(source, /console-stream-section/);
+  assert.doesNotMatch(source, /event\.snippet/);
+});
+
 test("review form captures required target role and optional job description", () => {
   assert.match(source, /targetRole/);
   assert.match(source, /targetDescription/);
@@ -54,6 +74,14 @@ test("review form captures required target role and optional job description", (
   assert.match(source, /formData\.append\("targetDescription"/);
   assert.match(source, /目标岗位/);
   assert.match(source, /岗位描述/);
+});
+
+test("review form supports local checkpoint resume and user interruption", () => {
+  assert.match(source, /loadLocalReviewRun/);
+  assert.match(source, /saveLocalReviewRun/);
+  assert.match(source, /AbortController/);
+  assert.match(source, /handleInterruptReview/);
+  assert.match(source, /formData\.append\("resumeState"/);
 });
 
 test("guest formal-login action clears the guest session instead of navigating to the login redirect", () => {
@@ -116,4 +144,27 @@ test("workflow status indicator renders as a bare dot without an outer circle", 
     assert.doesNotMatch(rule, /border-color:/);
     assert.doesNotMatch(rule, /background:/);
   }
+});
+
+test("workflow card status text fills the card width before wrapping", () => {
+  const cardRule = cssRule(".workflow-node-card");
+  assert.doesNotMatch(cardRule, /clamp\(52px,\s*3vw,\s*62px\)/);
+
+  const titleRule = exactCssRule(".workflow-node-content strong");
+  assert.match(titleRule, /padding-right:\s*32px/);
+
+  const statusRule = exactCssRule(".workflow-node-status-text");
+  assert.match(statusRule, /display:\s*block/);
+  assert.match(statusRule, /width:\s*100%/);
+  assert.match(statusRule, /padding-right:\s*0/);
+  assert.match(statusRule, /white-space:\s*normal/);
+  assert.doesNotMatch(statusRule, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(statusRule, /-webkit-line-clamp/);
+
+  const reviewerStatusRule = cssRule(".workflow-reviewer-row .workflow-node-status-text");
+  assert.match(reviewerStatusRule, /display:\s*block/);
+  assert.match(reviewerStatusRule, /width:\s*100%/);
+  assert.match(reviewerStatusRule, /white-space:\s*normal/);
+  assert.doesNotMatch(reviewerStatusRule, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(reviewerStatusRule, /-webkit-line-clamp/);
 });
