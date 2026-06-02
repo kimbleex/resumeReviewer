@@ -16,6 +16,7 @@ node_modules/
 coverage/
 dist/
 tsconfig.tsbuildinfo
+tsconfig.typecheck.tsbuildinfo
 
 # Test artifacts
 vitest.config.ts.timestamp-*
