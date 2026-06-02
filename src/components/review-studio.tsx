@@ -2567,10 +2567,10 @@ export function ReviewStudio({
                   退出登录
                 </button>
               ) : (
-                <a className="floating-identity-action-btn admin-link" href="/login" style={{ fontSize: "0.78rem" }}>
+                <button className="floating-identity-action-btn admin-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }} style={{ fontSize: "0.78rem" }}>
                   <LogOut size={14} style={{ transform: "rotate(180deg)" }} />
                   登录正式账号
-                </a>
+                </button>
               )}
             </div>
           </div>

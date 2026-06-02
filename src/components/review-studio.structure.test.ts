@@ -56,6 +56,12 @@ test("review form captures required target role and optional job description", (
   assert.match(source, /岗位描述/);
 });
 
+test("guest formal-login action clears the guest session instead of navigating to the login redirect", () => {
+  assert.match(source, /登录正式账号/);
+  assert.match(source, /handleLogout/);
+  assert.doesNotMatch(source, /href="\/login"/);
+});
+
 test("target job is configured through one dropdown trigger instead of inline inputs", () => {
   assert.match(source, /target-job-config/);
   assert.match(source, /target-job-trigger/);
