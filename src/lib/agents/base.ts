@@ -44,6 +44,7 @@ export function createStructuredAgentProgressTracker(options: {
   let activePhase: StructuredAgentPhase = "requesting_model";
   let hasReasoningStarted = false;
   let hasOutputStreamed = false;
+  let reasoningChunks = 0;
 
   const emitProgress = (event: StructuredAgentProgress) => {
     activePhase = event.phase;
@@ -63,6 +64,7 @@ export function createStructuredAgentProgressTracker(options: {
       });
     },
     recordReasoningStarted() {
+      reasoningChunks++;
       if (hasReasoningStarted) {
         return;
       }
@@ -101,9 +103,15 @@ export function createStructuredAgentProgressTracker(options: {
     },
     emitHeartbeat() {
       const elapsedSeconds = Math.max(0, Math.round((now() - startedAt) / 1000));
+      const phaseMessages: Record<StructuredAgentPhase, string> = {
+        requesting_model: `正在等待模型响应… (${elapsedSeconds}s)`,
+        model_thinking: `模型正在深度思考与推理中… (${elapsedSeconds}s, 已推理 ${reasoningChunks} 轮)`,
+        streaming_output: `模型正在生成结构化结果… (${elapsedSeconds}s)`,
+        validating_output: `正在校验输出结构… (${elapsedSeconds}s)`,
+      };
       emitProgress({
         phase: activePhase,
-        message: activePhase === "streaming_output" ? "模型仍在生成结构化结果，请稍候。" : "模型仍在执行，请稍候。",
+        message: phaseMessages[activePhase],
         details: [`${options.name} 已运行 ${elapsedSeconds} 秒`],
       });
     },
@@ -237,7 +245,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     },
   });
 
-  const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 15_000);
+  const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 8_000);
 
   const fullStreamTask = (async () => {
     for await (const part of result.fullStream) {

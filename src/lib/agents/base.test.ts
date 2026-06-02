@@ -44,7 +44,7 @@ test("structured agent progress tracker emits heartbeat for the active phase", (
 
   const heartbeat = events.at(-1);
   assert.equal(heartbeat?.phase, "model_thinking");
-  assert.match(heartbeat?.message ?? "", /仍在执行/);
+  assert.match(heartbeat?.message ?? "", /深度思考与推理中/);
   assert.deepEqual(heartbeat?.details, ["summary_agent 已运行 31 秒"]);
 });
 
