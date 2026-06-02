@@ -17,6 +17,87 @@ export type StructuredAgentProgress = {
   payload?: unknown;
 };
 
+export function createStructuredAgentProgressTracker(options: {
+  name: string;
+  onProgress?: (event: StructuredAgentProgress) => void;
+  now?: () => number;
+}) {
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  let activePhase: StructuredAgentPhase = "requesting_model";
+  let hasReasoningStarted = false;
+  let hasOutputStreamed = false;
+  let lastPartialSignature = "";
+
+  const emitProgress = (event: StructuredAgentProgress) => {
+    activePhase = event.phase;
+    options.onProgress?.(event);
+  };
+
+  const compactJson = (value: unknown) => JSON.stringify(value, null, 2).slice(0, 1200);
+
+  return {
+    start() {
+      emitProgress({
+        phase: "requesting_model",
+        message: "已向模型发送结构化请求。",
+        details: [`schema: ${options.name}`],
+      });
+      emitProgress({
+        phase: "model_thinking",
+        message: "模型已接收请求，正在分析输入。",
+      });
+    },
+    recordReasoningStarted() {
+      if (hasReasoningStarted) {
+        return;
+      }
+
+      hasReasoningStarted = true;
+      emitProgress({
+        phase: "model_thinking",
+        message: "模型已启动思考链条，正在深入分析并规划输出结构。",
+      });
+    },
+    recordTextDelta(text: string) {
+      if (!text) {
+        return;
+      }
+
+      const isFirstOutput = !hasOutputStreamed;
+      hasOutputStreamed = true;
+      emitProgress({
+        phase: "streaming_output",
+        message: isFirstOutput ? "模型思考已完成，开始生成结构化诊断报告信息体。" : "结构化诊断报告正在持续生成。",
+        snippet: text,
+        payload: { streamType: "output_text" },
+      });
+    },
+    recordPartialOutput(partial: unknown) {
+      const signature = compactJson(partial);
+      if (!signature || signature === lastPartialSignature) {
+        return;
+      }
+
+      lastPartialSignature = signature;
+      emitProgress({
+        phase: "streaming_output",
+        message: "结构化字段正在增量生成。",
+        snippet: `\n[partial_object]\n${signature}\n`,
+        payload: { streamType: "partial_object", partialObject: partial },
+      });
+    },
+    emitHeartbeat() {
+      const elapsedSeconds = Math.max(0, Math.round((now() - startedAt) / 1000));
+      emitProgress({
+        phase: activePhase,
+        message: activePhase === "streaming_output" ? "模型仍在生成结构化结果，请稍候。" : "模型仍在执行，请稍候。",
+        details: [`${options.name} 已运行 ${elapsedSeconds} 秒`],
+      });
+    },
+  };
+}
+
 export function dumpJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -113,23 +194,14 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
 }): Promise<TResult> {
   let latestPartialValue: DeepPartial<z.infer<TResponseFormat>> | undefined;
   let accumulatedText = "";
-  let hasOutputStreamed = false;
   let finishReason = "";
   let streamFailure: unknown;
-
-  const emitProgress = (event: StructuredAgentProgress) => {
-    options.onProgress?.(event);
-  };
-
-  emitProgress({
-    phase: "requesting_model",
-    message: "已向模型发送结构化请求。",
-    details: [`schema: ${options.name}`],
+  const progress = createStructuredAgentProgressTracker({
+    name: options.name,
+    onProgress: options.onProgress,
   });
-  emitProgress({
-    phase: "model_thinking",
-    message: "模型已接收请求，正在分析输入。",
-  });
+
+  progress.start();
 
   const result = streamText({
     model: createLanguageModel(),
@@ -144,30 +216,18 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     },
   });
 
-  let hasReasoningStarted = false;
+  const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 15_000);
 
   const fullStreamTask = (async () => {
     for await (const part of result.fullStream) {
       switch (part.type) {
         case "reasoning-delta": {
-          if (!hasReasoningStarted) {
-            hasReasoningStarted = true;
-            emitProgress({
-              phase: "model_thinking",
-              message: "模型已启动思考链条，正在深入分析并规划输出结构。",
-            });
-          }
+          progress.recordReasoningStarted();
           break;
         }
         case "text-delta": {
           accumulatedText += part.text;
-          if (!hasOutputStreamed) {
-            hasOutputStreamed = true;
-            emitProgress({
-              phase: "streaming_output",
-              message: "模型思考已完成，开始生成结构化诊断报告信息体。",
-            });
-          }
+          progress.recordTextDelta(part.text);
           break;
         }
         case "finish": {
@@ -187,13 +247,14 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   const partialStreamTask = (async () => {
     for await (const partial of result.partialOutputStream) {
       latestPartialValue = partial as DeepPartial<z.infer<TResponseFormat>>;
+      progress.recordPartialOutput(partial);
     }
   })();
 
   try {
     const output = await result.output;
 
-    emitProgress({
+    options.onProgress?.({
       phase: "validating_output",
       message: "正在校验最终结构化结果。",
       details: finishReason ? [`finish_reason: ${finishReason}`] : [],
@@ -204,7 +265,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   } catch (error) {
     await Promise.allSettled([fullStreamTask, partialStreamTask]);
 
-    emitProgress({
+    options.onProgress?.({
       phase: "validating_output",
       message: "最终结果校验失败，正在尝试恢复可用结构。",
       details: [toErrorMessage(error)],
@@ -218,7 +279,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     });
 
     if (recovered) {
-      emitProgress({
+      options.onProgress?.({
         phase: "validating_output",
         message: "已从增量输出中恢复结构化结果。",
         details: ["采用流式片段完成最终解析。"],
@@ -231,5 +292,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     }
 
     throw new Error(toErrorMessage(error));
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }
