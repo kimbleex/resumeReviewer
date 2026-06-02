@@ -16,6 +16,10 @@ export async function POST(
   }
 
   const { id } = await context.params;
+  if (id === admin.user.id) {
+    return NextResponse.json({ error: "不允许踢自己下线。" }, { status: 403 });
+  }
+
   await revokeAllMemberSessions(id);
   return NextResponse.json({ ok: true });
 }

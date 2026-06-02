@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { clearAuthCookies, REFRESH_TOKEN_COOKIE } from "@/lib/auth/cookies";
+import { clearAuthCookies, REFRESH_TOKEN_COOKIE, clearGuestCookie } from "@/lib/auth/cookies";
 import { revokeSessionByRefreshToken } from "@/lib/auth/sessions";
 
 export const runtime = "nodejs";
@@ -15,5 +15,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const response = NextResponse.json({ ok: true });
   clearAuthCookies(response);
+  clearGuestCookie(response);
   return response;
 }

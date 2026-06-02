@@ -21,12 +21,16 @@ export async function PATCH(
     return NextResponse.json({ error: "需要管理员权限。" }, { status: 403 });
   }
 
+  const { id } = await context.params;
+  if (id === admin.user.id) {
+    return NextResponse.json({ error: "不允许对自己的账号执行此操作。" }, { status: 403 });
+  }
+
   const parsed = updateUserSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "用户更新参数无效。" }, { status: 400 });
   }
 
-  const { id } = await context.params;
   const user = await updateUserStatusAndRole(id, parsed.data);
   return NextResponse.json({ user });
 }

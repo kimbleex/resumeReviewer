@@ -20,12 +20,16 @@ export async function POST(
     return NextResponse.json({ error: "需要管理员权限。" }, { status: 403 });
   }
 
+  const { id } = await context.params;
+  if (id === admin.user.id) {
+    return NextResponse.json({ error: "不允许通过后台重置自己的密码。" }, { status: 403 });
+  }
+
   const parsed = resetPasswordSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "新密码至少 8 位。" }, { status: 400 });
   }
 
-  const { id } = await context.params;
   await resetMemberPassword(id, parsed.data.password);
   return NextResponse.json({ ok: true });
 }
