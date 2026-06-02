@@ -1,7 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Ban, LoaderCircle, RefreshCcw, Shield, UserPlus } from "lucide-react";
+import {
+  Ban,
+  LoaderCircle,
+  RefreshCcw,
+  Shield,
+  UserPlus,
+  ArrowLeft,
+  Calendar,
+  Users,
+  Compass,
+  Cpu,
+  Clock,
+  Key,
+  LogOut,
+  Activity,
+} from "lucide-react";
 
 type AdminUser = {
   id: string;
@@ -101,21 +116,29 @@ export function AdminPanel() {
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await api("/api/admin/users", {
-      method: "POST",
-      body: JSON.stringify({ username, password, role: "MEMBER" }),
-    });
-    setUsername("");
-    setPassword("");
-    await refresh();
+    try {
+      await api("/api/admin/users", {
+        method: "POST",
+        body: JSON.stringify({ username, password, role: "MEMBER" }),
+      });
+      setUsername("");
+      setPassword("");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "创建成员失败。");
+    }
   }
 
   async function toggleUser(user: AdminUser) {
-    await api(`/api/admin/users/${user.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: user.status === "ACTIVE" ? "BLOCKED" : "ACTIVE" }),
-    });
-    await refresh();
+    try {
+      await api(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: user.status === "ACTIVE" ? "BLOCKED" : "ACTIVE" }),
+      });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "状态更新失败。");
+    }
   }
 
   async function resetPassword(user: AdminUser) {
@@ -123,24 +146,36 @@ export function AdminPanel() {
     if (!nextPassword) {
       return;
     }
-    await api(`/api/admin/users/${user.id}/reset-password`, {
-      method: "POST",
-      body: JSON.stringify({ password: nextPassword }),
-    });
-    await refresh();
+    try {
+      await api(`/api/admin/users/${user.id}/reset-password`, {
+        method: "POST",
+        body: JSON.stringify({ password: nextPassword }),
+      });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重置密码失败。");
+    }
   }
 
   async function revokeUserSessions(user: AdminUser) {
-    await api(`/api/admin/users/${user.id}/revoke-sessions`, { method: "POST" });
-    await refresh();
+    try {
+      await api(`/api/admin/users/${user.id}/revoke-sessions`, { method: "POST" });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "撤销会话失败。");
+    }
   }
 
   async function toggleGuest(guest: AdminGuest) {
-    await api(`/api/admin/guests/${guest.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: guest.status === "ACTIVE" ? "BLOCKED" : "ACTIVE" }),
-    });
-    await refresh();
+    try {
+      await api(`/api/admin/guests/${guest.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: guest.status === "ACTIVE" ? "BLOCKED" : "ACTIVE" }),
+      });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "状态更新失败。");
+    }
   }
 
   async function setGuestQuota(guest: AdminGuest) {
@@ -148,19 +183,27 @@ export function AdminPanel() {
     if (value === null) {
       return;
     }
-    await api(`/api/admin/guests/${guest.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ maxTrialCount: Number(value) }),
-    });
-    await refresh();
+    try {
+      await api(`/api/admin/guests/${guest.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ maxTrialCount: Number(value) }),
+      });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更新额度失败。");
+    }
   }
 
   async function revokeSession(session: AdminSession) {
-    await api(`/api/admin/sessions/${session.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: "REVOKED" }),
-    });
-    await refresh();
+    try {
+      await api(`/api/admin/sessions/${session.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "REVOKED" }),
+      });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "撤销会话失败。");
+    }
   }
 
   return (
@@ -168,34 +211,99 @@ export function AdminPanel() {
       <header className="admin-header">
         <div>
           <span className="eyebrow">ADMIN CONTROL PANEL</span>
-          <h1>访问控制面板</h1>
+          <h1 style={{ margin: "4px 0 0", fontSize: "1.6rem", fontWeight: 800 }}>访问控制面板</h1>
         </div>
-        <div className="admin-header-actions">
-          <a className="identity-link" href="/">
+        <div className="admin-header-actions" style={{ display: "flex", gap: "10px" }}>
+          <a
+            className="secondary-action"
+            href="/"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              textDecoration: "none",
+              height: "36px",
+            }}
+          >
+            <ArrowLeft size={14} />
             返回工作台
           </a>
-          <button className="identity-link" type="button" onClick={refresh}>
-            <RefreshCcw size={14} />
-            刷新
+          <button className="primary-action" type="button" onClick={refresh} style={{ height: "36px" }}>
+            <RefreshCcw size={14} className={isLoading ? "spin-icon" : ""} />
+            刷新数据
           </button>
         </div>
       </header>
 
       {message ? <div className="top-error-banner">{message}</div> : null}
-      {isLoading ? (
+
+      {/* Stats Summary Panel */}
+      <div className="admin-stats-grid">
+        <div className="admin-stat-card">
+          <div className="admin-stat-icon-wrapper">
+            <Users size={20} />
+          </div>
+          <div className="admin-stat-info">
+            <span className="admin-stat-label">正式成员</span>
+            <strong className="admin-stat-number">{users.length}</strong>
+          </div>
+        </div>
+        <div className="admin-stat-card">
+          <div className="admin-stat-icon-wrapper visitor">
+            <Compass size={20} />
+          </div>
+          <div className="admin-stat-info">
+            <span className="admin-stat-label">游客试用</span>
+            <strong className="admin-stat-number">{guests.length}</strong>
+          </div>
+        </div>
+        <div className="admin-stat-card">
+          <div className="admin-stat-icon-wrapper session">
+            <Shield size={20} />
+          </div>
+          <div className="admin-stat-info">
+            <span className="admin-stat-label">活动会话</span>
+            <strong className="admin-stat-number">
+              {sessions.filter((s) => s.status === "ACTIVE").length}
+            </strong>
+          </div>
+        </div>
+        <div className="admin-stat-card">
+          <div className="admin-stat-icon-wrapper run">
+            <Cpu size={20} />
+          </div>
+          <div className="admin-stat-info">
+            <span className="admin-stat-label">诊断运行</span>
+            <strong className="admin-stat-number">{reviewRuns.length}</strong>
+          </div>
+        </div>
+      </div>
+
+      {isLoading && (
         <div className="admin-loading">
           <LoaderCircle className="spin-icon" size={20} />
           正在加载后台数据...
         </div>
-      ) : null}
+      )}
 
       <section className="admin-section">
         <div className="admin-section-header">
           <h2>正式成员</h2>
           <form className="admin-create-form" onSubmit={handleCreateUser}>
-            <input value={username} onChange={(event) => setUsername(event.currentTarget.value)} placeholder="用户名" />
-            <input value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="初始密码" type="password" />
-            <button className="primary-action" type="submit">
+            <input
+              value={username}
+              onChange={(event) => setUsername(event.currentTarget.value)}
+              placeholder="用户名"
+              required
+            />
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              placeholder="初始密码"
+              type="password"
+              required
+            />
+            <button className="primary-action" type="submit" style={{ height: "36px" }}>
               <UserPlus size={15} />
               创建成员
             </button>
@@ -204,16 +312,51 @@ export function AdminPanel() {
         <div className="admin-table">
           {users.map((user) => (
             <div className="admin-row" key={user.id}>
-              <strong>{user.username}</strong>
-              <span>{user.role}</span>
-              <span className={`admin-status ${user.status.toLowerCase()}`}>{user.status}</span>
-              <span>登录：{formatDate(user.lastLoginAt)}</span>
-              <span>运行：{user._count?.reviewRuns ?? 0}</span>
-              <button onClick={() => toggleUser(user)} type="button">{user.status === "ACTIVE" ? "禁用" : "启用"}</button>
-              <button onClick={() => resetPassword(user)} type="button">重置密码</button>
-              <button onClick={() => revokeUserSessions(user)} type="button">踢下线</button>
+              <div className="admin-user-profile">
+                <div className={`admin-user-avatar ${user.role === "ADMIN" ? "admin" : ""}`}>
+                  {user.username.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="admin-user-details">
+                  <span className="admin-user-name">{user.username}</span>
+                  <span className="admin-user-meta">{user.role === "ADMIN" ? "系统管理员" : "正式成员"}</span>
+                </div>
+              </div>
+              <span className={`admin-status ${user.status.toLowerCase()}`}>
+                {user.status === "ACTIVE" ? "正常" : "已禁用"}
+              </span>
+              <span className="admin-stat-item">
+                <Clock size={13} />
+                登录：{formatDate(user.lastLoginAt)}
+              </span>
+              <span className="admin-stat-item">
+                <Cpu size={13} />
+                运行：{user._count?.reviewRuns ?? 0} 次
+              </span>
+              <div className="admin-action-group">
+                <button
+                  className={`admin-btn ${user.status === "ACTIVE" ? "danger" : "success"}`}
+                  onClick={() => toggleUser(user)}
+                  type="button"
+                >
+                  <Ban size={12} />
+                  {user.status === "ACTIVE" ? "禁用" : "启用"}
+                </button>
+                <button className="admin-btn" onClick={() => resetPassword(user)} type="button">
+                  <Key size={12} />
+                  重置密码
+                </button>
+                <button className="admin-btn danger" onClick={() => revokeUserSessions(user)} type="button">
+                  <LogOut size={12} />
+                  踢下线
+                </button>
+              </div>
             </div>
           ))}
+          {users.length === 0 && !isLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.86rem" }}>
+              暂无正式成员数据
+            </div>
+          )}
         </div>
       </section>
 
@@ -224,55 +367,132 @@ export function AdminPanel() {
         <div className="admin-table">
           {guests.map((guest) => (
             <div className="admin-row" key={guest.id}>
-              <strong>{guest.id.slice(0, 10)}</strong>
-              <span className={`admin-status ${guest.status.toLowerCase()}`}>{guest.status}</span>
-              <span>次数：{guest.trialUsedCount}/{guest.maxTrialCount}</span>
-              <span>最近：{formatDate(guest.lastSeenAt)}</span>
-              <span>运行：{guest._count?.reviewRuns ?? 0}</span>
-              <button onClick={() => toggleGuest(guest)} type="button">
-                <Ban size={13} />
-                {guest.status === "ACTIVE" ? "禁用" : "启用"}
-              </button>
-              <button onClick={() => setGuestQuota(guest)} type="button">调整额度</button>
+              <div className="admin-user-profile">
+                <div
+                  className="admin-user-avatar"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(139, 92, 246, 0.12))",
+                    borderColor: "rgba(139, 92, 246, 0.25)",
+                    color: "#a78bfa",
+                  }}
+                >
+                  G
+                </div>
+                <div className="admin-user-details">
+                  <span className="admin-user-name">游客 {guest.id.slice(0, 8)}</span>
+                  <span className="admin-user-meta">临时指纹会话</span>
+                </div>
+              </div>
+              <span className={`admin-status ${guest.status.toLowerCase()}`}>
+                {guest.status === "ACTIVE" ? "正常" : "已禁用"}
+              </span>
+              <span className="admin-stat-item">
+                <Activity size={13} />
+                额度：{guest.trialUsedCount} / {guest.maxTrialCount}
+              </span>
+              <span className="admin-stat-item">
+                <Clock size={13} />
+                最近：{formatDate(guest.lastSeenAt)}
+              </span>
+              <span className="admin-stat-item">
+                <Cpu size={13} />
+                运行：{guest._count?.reviewRuns ?? 0} 次
+              </span>
+              <div className="admin-action-group">
+                <button
+                  className={`admin-btn ${guest.status === "ACTIVE" ? "danger" : "success"}`}
+                  onClick={() => toggleGuest(guest)}
+                  type="button"
+                >
+                  <Ban size={12} />
+                  {guest.status === "ACTIVE" ? "禁用" : "启用"}
+                </button>
+                <button className="admin-btn" onClick={() => setGuestQuota(guest)} type="button">
+                  <Compass size={12} />
+                  调整额度
+                </button>
+              </div>
             </div>
           ))}
+          {guests.length === 0 && !isLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.86rem" }}>
+              暂无游客指纹数据
+            </div>
+          )}
         </div>
       </section>
 
-      <section className="admin-grid">
-        <div className="admin-section">
+      <div className="admin-grid">
+        <section className="admin-section">
           <div className="admin-section-header">
-            <h2>会话</h2>
+            <h2>活动会话</h2>
           </div>
           <div className="admin-table compact">
             {sessions.map((session) => (
               <div className="admin-row" key={session.id}>
-                <Shield size={14} />
-                <strong>{session.user.username}</strong>
-                <span className={`admin-status ${session.status.toLowerCase()}`}>{session.status}</span>
-                <span>过期：{formatDate(session.expiresAt)}</span>
-                <button onClick={() => revokeSession(session)} disabled={session.status !== "ACTIVE"} type="button">撤销</button>
+                <Shield size={14} style={{ color: session.status === "ACTIVE" ? "var(--cyan)" : "var(--text-dim)", opacity: 0.8 }} />
+                <div className="admin-user-details" style={{ minWidth: 0 }}>
+                  <span className="admin-user-name">{session.user.username}</span>
+                  <span className="admin-user-meta">{session.user.role === "ADMIN" ? "管理员" : "正式成员"}</span>
+                </div>
+                <span className={`admin-status ${session.status.toLowerCase()}`}>
+                  {session.status === "ACTIVE" ? "活跃" : session.status === "REVOKED" ? "已撤销" : "已过期"}
+                </span>
+                <span className="admin-stat-item" style={{ fontSize: "0.72rem" }}>
+                  <Clock size={12} />
+                  失效：{formatDate(session.expiresAt)}
+                </span>
+                <div className="admin-action-group">
+                  <button
+                    className="admin-btn danger"
+                    onClick={() => revokeSession(session)}
+                    disabled={session.status !== "ACTIVE"}
+                    type="button"
+                    style={{ height: "26px", padding: "0 8px", fontSize: "0.72rem" }}
+                  >
+                    <Ban size={11} />
+                    撤销
+                  </button>
+                </div>
               </div>
             ))}
+            {sessions.length === 0 && !isLoading && (
+              <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.86rem" }}>
+                暂无会话数据
+              </div>
+            )}
           </div>
-        </div>
+        </section>
 
-        <div className="admin-section">
+        <section className="admin-section">
           <div className="admin-section-header">
             <h2>运行记录</h2>
           </div>
           <div className="admin-table compact">
             {reviewRuns.map((run) => (
               <div className="admin-row" key={run.id}>
-                <strong>{run.targetRole}</strong>
-                <span>{run.user?.username ?? `游客 ${run.guest?.id.slice(0, 8) ?? "-"}`}</span>
-                <span className={`admin-status ${run.status.toLowerCase()}`}>{run.status}</span>
-                <span>{formatDate(run.startedAt)}</span>
+                <Cpu size={14} style={{ color: "var(--cyan)", opacity: 0.8 }} />
+                <div className="admin-user-details" style={{ minWidth: 0 }}>
+                  <span className="admin-user-name" style={{ fontSize: "0.78rem" }}>{run.targetRole}</span>
+                  <span className="admin-user-meta">{run.user?.username ?? `游客 ${run.guest?.id.slice(0, 8) ?? "-"}`}</span>
+                </div>
+                <span className={`admin-status ${run.status.toLowerCase()}`}>
+                  {run.status === "COMPLETED" ? "完成" : run.status === "FAILED" ? "失败" : "进行中"}
+                </span>
+                <span className="admin-stat-item" style={{ fontSize: "0.72rem" }}>
+                  <Calendar size={12} />
+                  {formatDate(run.startedAt)}
+                </span>
               </div>
             ))}
+            {reviewRuns.length === 0 && !isLoading && (
+              <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.86rem" }}>
+                暂无诊断运行记录
+              </div>
+            )}
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }

@@ -58,24 +58,24 @@ type StageStatus = "pending" | "running" | "done";
 
 export type ReviewIdentity =
   | {
-      kind: "user";
-      user: {
-        id: string;
-        username: string;
-        role: "ADMIN" | "MEMBER";
-        status: "ACTIVE" | "BLOCKED";
-      };
-    }
-  | {
-      kind: "guest";
-      guest: {
-        id: string;
-        status: "ACTIVE" | "BLOCKED";
-        trialUsedCount: number;
-        maxTrialCount: number;
-        remainingTrialCount: number;
-      };
+    kind: "user";
+    user: {
+      id: string;
+      username: string;
+      role: "ADMIN" | "MEMBER";
+      status: "ACTIVE" | "BLOCKED";
     };
+  }
+  | {
+    kind: "guest";
+    guest: {
+      id: string;
+      status: "ACTIVE" | "BLOCKED";
+      trialUsedCount: number;
+      maxTrialCount: number;
+      remainingTrialCount: number;
+    };
+  };
 
 const STAGE_ORDER = [
   "resume_loader",
@@ -2409,7 +2409,7 @@ export function ReviewStudio({
         <div className="topbar-brand">
           <span className="eyebrow">RESUME DIAGNOSTIC CORE</span>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <h1 style={{ margin: 0 }}>多 Agent 智能简历评审工作台</h1>
+            <h1 style={{ margin: 0 }}>Mutil-Agent Resume Reviewer</h1>
             {identity && (
               <span className={`identity-badge identity-badge-${identity.kind === "user" ? (identity.user.role === "ADMIN" ? "admin" : "member") : "guest"}`}>
                 {identity.kind === "user" ? (identity.user.role === "ADMIN" ? "管理员" : "正式成员") : `游客试用 (余 ${guestRemainingTrialCount} 次)`}
@@ -2553,7 +2553,7 @@ export function ReviewStudio({
                 </span>
               </div>
             </div>
-            
+
             <div className="floating-identity-actions">
               {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
                 <a className="floating-identity-action-btn admin-link" href="/admin">
