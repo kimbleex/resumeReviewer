@@ -304,3 +304,81 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     clearInterval(heartbeatTimer);
   }
 }
+
+export async function invokeTextAgent(options: {
+  name: string;
+  systemPrompt: string;
+  userContent: string;
+  onProgress?: (event: StructuredAgentProgress) => void;
+  abortSignal?: AbortSignal;
+}): Promise<string> {
+  let accumulatedText = "";
+  let finishReason = "";
+  let streamFailure: unknown;
+  const progress = createStructuredAgentProgressTracker({
+    name: options.name,
+    onProgress: options.onProgress,
+  });
+
+  progress.start();
+
+  const result = streamText({
+    model: createLanguageModel(),
+    system: options.systemPrompt,
+    prompt: options.userContent,
+    abortSignal: options.abortSignal,
+    timeout: getStructuredAgentTimeout(),
+    onError({ error }) {
+      streamFailure = error;
+    },
+  });
+
+  const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 8_000);
+
+  try {
+    for await (const part of result.fullStream) {
+      switch (part.type) {
+        case "reasoning-delta": {
+          progress.recordReasoningStarted();
+          break;
+        }
+        case "text-delta": {
+          accumulatedText += part.text;
+          progress.recordTextDelta(part.text);
+          break;
+        }
+        case "finish": {
+          finishReason = part.finishReason;
+          break;
+        }
+        case "error": {
+          streamFailure = part.error;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    if (streamFailure) {
+      throw streamFailure;
+    }
+
+    options.onProgress?.({
+      phase: "validating_output",
+      message: "正在整理最终文本结果。",
+      details: finishReason ? [`finish_reason: ${finishReason}`] : [],
+    });
+
+    return accumulatedText.trim();
+  } catch (error) {
+    options.onProgress?.({
+      phase: "validating_output",
+      message: "文本结果生成失败，正在结束本次 Agent 调用。",
+      details: [structuredAgentErrorMessage(error)],
+    });
+    throw new Error(structuredAgentErrorMessage(error));
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
+}

@@ -84,6 +84,18 @@ test("review form supports local checkpoint resume and user interruption", () =>
   assert.match(source, /formData\.append\("resumeState"/);
 });
 
+test("review stream reports premature connection close instead of staying running", () => {
+  assert.match(source, /receivedTerminalChunk/);
+  assert.match(source, /诊断连接已提前关闭/);
+});
+
+test("agent terminal logs surface stream errors for running stages", () => {
+  assert.match(source, /appendTerminalError/);
+  assert.match(source, /type:\s*"error"/);
+  assert.match(source, /appendTerminalError\(chunk\.message\)/);
+  assert.match(source, /appendTerminalError\(errorMessage\)/);
+});
+
 test("guest formal-login action clears the guest session instead of navigating to the login redirect", () => {
   assert.match(source, /登录正式账号/);
   assert.match(source, /handleLogout/);

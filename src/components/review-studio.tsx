@@ -2345,6 +2345,8 @@ export function ReviewStudio({
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
+  const runningStagesRef = useRef<StageName[]>([]);
+  const selectedStageRef = useRef<StageName>("resume_loader");
   const ownerKey = getReviewOwnerKey(identity);
   const isGuest = identity?.kind === "guest";
   const guestRemainingTrialCount = isGuest ? identity.guest.remainingTrialCount : 0;
@@ -2372,6 +2374,14 @@ export function ReviewStudio({
       ? `${cachedResumeFileName} (本地断点)`
       : "选择简历源文件";
   const primaryActionLabel = isRunning ? "专家团诊断中..." : canResumeLocalRun ? "继续诊断" : "启动简历诊断";
+
+  useEffect(() => {
+    runningStagesRef.current = runningStages;
+  }, [runningStages]);
+
+  useEffect(() => {
+    selectedStageRef.current = selectedStage;
+  }, [selectedStage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2504,6 +2514,34 @@ export function ReviewStudio({
     [flushPendingProgressEvents],
   );
 
+  const appendTerminalError = useCallback((message: string) => {
+    const trimmedMessage = message.trim() || "诊断执行失败。";
+    const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    const targets = runningStagesRef.current.length > 0 ? runningStagesRef.current : [selectedStageRef.current];
+
+    setStageStreams((previous) => {
+      const nextStreams = { ...previous };
+      targets.forEach((stage) => {
+        const current = nextStreams[stage] ?? createEmptyStageLiveState();
+        const errorLog: StageLogEntry = {
+          timestamp,
+          phase: current.phase,
+          message: trimmedMessage,
+          type: "error",
+        };
+        nextStreams[stage] = {
+          ...current,
+          latestMessage: trimmedMessage,
+          logs: [
+            ...(current.logs || []),
+            errorLog,
+          ].slice(-24),
+        };
+      });
+      return nextStreams;
+    });
+  }, []);
+
   useEffect(
     () => () => {
       if (progressFlushTimerRef.current) {
@@ -2547,6 +2585,7 @@ export function ReviewStudio({
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let receivedTerminalChunk = false;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -2563,10 +2602,18 @@ export function ReviewStudio({
         try {
           chunk = parseChunkLine(line);
         } catch {
+          const errorMessage =
+            line.startsWith("<!DOCTYPE") ||
+            line.startsWith("<html") ||
+            line.includes("Gateway Timeout") ||
+            line.includes("Internal Server Error")
+              ? "服务器网络超时或发生内部错误，诊断已被中断，请重试。"
+              : `流式响应解析失败: ${line.slice(0, 100)}`;
+          appendTerminalError(errorMessage);
           if (line.startsWith("<!DOCTYPE") || line.startsWith("<html") || line.includes("Gateway Timeout") || line.includes("Internal Server Error")) {
-            setErrorMessage("服务器网络超时或发生内部错误，诊断已被中断，请重试。");
+            setErrorMessage(errorMessage);
           } else {
-            setErrorMessage(`流式响应解析失败: ${line.slice(0, 100)}`);
+            setErrorMessage(errorMessage);
           }
           setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
           setIsRunning(false);
@@ -2578,6 +2625,7 @@ export function ReviewStudio({
           continue;
         }
         if (chunk.type === "result") {
+          receivedTerminalChunk = true;
           flushPendingProgressEvents();
           setFinalResult(chunk.result);
           setSelectedStage("rewrite_agent");
@@ -2586,7 +2634,9 @@ export function ReviewStudio({
           onSessionChanged?.();
           continue;
         }
+        receivedTerminalChunk = true;
         flushPendingProgressEvents();
+        appendTerminalError(chunk.message);
         setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
         setErrorMessage(chunk.message);
         setIsRunning(false);
@@ -2597,6 +2647,10 @@ export function ReviewStudio({
       if (done) {
         break;
       }
+    }
+
+    if (!receivedTerminalChunk) {
+      throw new Error("诊断连接已提前关闭，可能是云端执行时间超过限制。请点击继续诊断重试。");
     }
   }
 
@@ -2786,17 +2840,17 @@ export function ReviewStudio({
       const wasAborted =
         abortController.signal.aborted ||
         (error instanceof DOMException && error.name === "AbortError");
+      const errorMessage = wasAborted
+        ? "已中断诊断，可点击继续诊断从本地断点重试。"
+        : error instanceof Error
+          ? error.message
+          : "Review request failed.";
+      appendTerminalError(errorMessage);
       setStageStatus((previous) =>
         (wasAborted ? interruptRunningStages(previous) : failRunningStages(previous)) as Record<StageName, StageStatus>,
       );
       setRunningStages([]);
-      setErrorMessage(
-        wasAborted
-          ? "已中断诊断，可点击继续诊断从本地断点重试。"
-          : error instanceof Error
-            ? error.message
-            : "Review request failed.",
-      );
+      setErrorMessage(errorMessage);
       setIsRunning(false);
       requestAbortControllerRef.current = null;
     }
@@ -2806,7 +2860,8 @@ export function ReviewStudio({
     targetRole,
     targetDescription,
     handleChunkStream,
-    flushPendingProgressEvents
+    flushPendingProgressEvents,
+    appendTerminalError
   ]);
 
   const handleStartStage = useCallback(async (stage: StageName) => {
