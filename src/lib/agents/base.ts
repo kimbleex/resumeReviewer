@@ -1,4 +1,4 @@
-import { NoObjectGeneratedError, Output, streamText, type DeepPartial } from "ai";
+import { NoObjectGeneratedError, Output, streamText } from "ai";
 import type { z } from "zod";
 
 import { createLanguageModel } from "@/lib/llm";
@@ -180,19 +180,7 @@ function tryRecoverResult<TResponseFormat extends z.ZodTypeAny, TResult>(options
   responseFormat: TResponseFormat;
   normalize: (value: z.infer<TResponseFormat>) => TResult;
   rawText: string;
-  partialValue: DeepPartial<z.infer<TResponseFormat>> | undefined;
 }): TResult | null {
-  if (options.partialValue !== undefined) {
-    const partialResult = tryNormalizeResult({
-      responseFormat: options.responseFormat,
-      normalize: options.normalize,
-      value: options.partialValue,
-    });
-    if (partialResult) {
-      return partialResult;
-    }
-  }
-
   const cleaned = cleanStructuredText(options.rawText);
   if (!cleaned) {
     return null;
@@ -219,7 +207,6 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   onProgress?: (event: StructuredAgentProgress) => void;
   abortSignal?: AbortSignal;
 }): Promise<TResult> {
-  let latestPartialValue: DeepPartial<z.infer<TResponseFormat>> | undefined;
   let accumulatedText = "";
   let finishReason = "";
   let streamFailure: unknown;
@@ -273,13 +260,6 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     }
   })();
 
-  const partialStreamTask = (async () => {
-    for await (const partial of result.partialOutputStream) {
-      latestPartialValue = partial as DeepPartial<z.infer<TResponseFormat>>;
-      progress.recordPartialOutput(partial);
-    }
-  })();
-
   try {
     const output = await result.output;
 
@@ -289,10 +269,10 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
       details: finishReason ? [`finish_reason: ${finishReason}`] : [],
     });
 
-    await Promise.all([fullStreamTask, partialStreamTask]);
+    await fullStreamTask;
     return options.normalize(output as z.infer<TResponseFormat>);
   } catch (error) {
-    await Promise.allSettled([fullStreamTask, partialStreamTask]);
+    await Promise.allSettled([fullStreamTask]);
 
     options.onProgress?.({
       phase: "validating_output",
@@ -304,7 +284,6 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
       responseFormat: options.responseFormat,
       normalize: options.normalize,
       rawText: NoObjectGeneratedError.isInstance(error) ? error.text ?? accumulatedText : accumulatedText,
-      partialValue: latestPartialValue,
     });
 
     if (recovered) {

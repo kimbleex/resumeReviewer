@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   createStructuredAgentProgressTracker,
@@ -60,4 +61,10 @@ test("structured agent timeout errors are shown as actionable Chinese messages",
     structuredAgentErrorMessage(new Error("streamText timed out after 90000ms")),
     "模型调用超时，请稍后重试或换一个更快的模型。",
   );
+});
+
+test("structured agent avoids incremental object parsing during long streams", () => {
+  const source = readFileSync(new URL("./base.ts", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /partialOutputStream/);
 });
