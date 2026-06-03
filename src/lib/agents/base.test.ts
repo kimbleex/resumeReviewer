@@ -51,8 +51,8 @@ test("structured agent progress tracker emits heartbeat for the active phase", (
 
 test("structured agent calls have hard total and no-chunk timeouts", () => {
   assert.deepEqual(getStructuredAgentTimeout(), {
-    totalMs: 180000,
-    chunkMs: 90000,
+    totalMs: 270000,
+    chunkMs: 120000,
   });
 });
 

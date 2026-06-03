@@ -29,8 +29,8 @@ function readPositiveIntegerEnv(name: string, fallback: number): number {
 
 export function getStructuredAgentTimeout() {
   return {
-    totalMs: readPositiveIntegerEnv("AGENT_TOTAL_TIMEOUT_MS", 180_000),
-    chunkMs: readPositiveIntegerEnv("AGENT_CHUNK_TIMEOUT_MS", 90_000),
+    totalMs: readPositiveIntegerEnv("AGENT_TOTAL_TIMEOUT_MS", 270_000),
+    chunkMs: readPositiveIntegerEnv("AGENT_CHUNK_TIMEOUT_MS", 120_000),
   };
 }
 

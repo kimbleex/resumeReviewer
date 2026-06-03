@@ -8,7 +8,7 @@ import { reviewStreamChunkSchema, targetJobSchema, type ReviewStageEvent, type R
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120; // 允许 Vercel 运行最长 60 秒以支持多 Agent 流式会诊
+export const maxDuration = 300; // 允许 Vercel 运行最长 5 分钟以支持多 Agent 流式会诊
 
 function encodeChunk(encoder: TextEncoder, chunk: ReviewStreamChunk): Uint8Array {
   return encoder.encode(`${JSON.stringify(reviewStreamChunkSchema.parse(chunk))}\n`);
