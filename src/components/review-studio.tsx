@@ -7,6 +7,8 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ChevronDown,
+  FilePenLine,
+  GitBranch,
   LoaderCircle,
   LogOut,
   Play,
@@ -46,6 +48,7 @@ import {
   type StageName,
   type StageStatus,
 } from "@/components/review-studio-shared";
+import { PdfAgentWorkbench } from "@/components/pdf-agent-workbench";
 
 // Result panels (incl. html2pdf export + heavy lucide icons) are only needed
 // once a stage-detail drawer is opened, so load them in a separate chunk.
@@ -931,6 +934,8 @@ export function ReviewStudio({
   const [finalResult, setFinalResult] = useState<ReviewRunResult | null>(null);
   const [selectedStage, setSelectedStage] = useState<StageName>("resume_loader");
   const [detailsStage, setDetailsStage] = useState<StageName | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<"workflow" | "agent">("workflow");
+  const [isWorkflowControlsCollapsed, setIsWorkflowControlsCollapsed] = useState(false);
   const [isIdentityMenuOpen, setIsIdentityMenuOpen] = useState(false);
   const floatingMenuRef = useRef<HTMLDivElement>(null);
 
@@ -1583,185 +1588,228 @@ export function ReviewStudio({
       <header className="compact-topbar">
         <div className="topbar-brand">
           <span className="eyebrow">RESUME DIAGNOSTIC CORE</span>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <h1 style={{ margin: 0 }}>Mutil-Agent Resume Reviewer</h1>
-            {identity && (
-              <span className={`identity-badge identity-badge-${identity.kind === "user" ? (identity.user.role === "ADMIN" ? "admin" : "member") : "guest"}`}>
-                {identity.kind === "user" ? (identity.user.role === "ADMIN" ? "管理员" : "正式成员") : `游客试用 (余 ${guestRemainingTrialCount} 次)`}
-              </span>
-            )}
-          </div>
+          <h1>Mutil-Agent Resume Reviewer</h1>
         </div>
 
-        <form className="topbar-actions" onSubmit={handleSubmit}>
-          <label className="compact-upload">
-            <input
-              type="file"
-              accept=".txt,.md,.pdf,.docx"
-              onChange={(event) => {
-                const nextFile = event.currentTarget.files?.[0] ?? null;
-                setResumeFile(nextFile);
-                if (nextFile) {
-                  setCachedResumeFileName(nextFile.name);
-                  setCurrentRunId(null);
-                  setErrorMessage("");
-                }
-              }}
-            />
-            <Upload size={17} />
-            <span>{uploadLabel}</span>
-          </label>
+        <nav className="workspace-nav" aria-label="工作台导航">
+          <button
+            className={`workspace-nav-button ${activeWorkspace === "workflow" ? "is-active" : ""}`}
+            type="button"
+            onClick={() => setActiveWorkspace("workflow")}
+          >
+            <GitBranch size={15} />
+            <span>工作流诊断</span>
+          </button>
+          <button
+            className={`workspace-nav-button ${activeWorkspace === "agent" ? "is-active" : ""}`}
+            type="button"
+            onClick={() => setActiveWorkspace("agent")}
+          >
+            <FilePenLine size={15} />
+            <span>Agent 改简历</span>
+          </button>
+        </nav>
 
-          <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
-            <button
-              className={`target-job-trigger ${targetRole ? "is-configured" : ""}`}
-              type="button"
-              onClick={handleToggleTargetJob}
-              disabled={isRunning}
-              aria-expanded={isTargetJobOpen}
-              aria-haspopup="dialog"
-            >
-              <BriefcaseBusiness size={16} />
-              <span className="target-job-trigger-copy">
-                <strong>目标岗位</strong>
-                <span>{targetRole || "点击配置岗位名称/描述"}</span>
-              </span>
-              <span className={`target-job-state ${targetRole ? "is-configured" : "is-empty"}`}>
-                {targetRole ? (
-                  <>
-                    <CheckCircle2 size={13} />
-                    已配置
-                  </>
-                ) : (
-                  "未配置"
-                )}
-              </span>
-              <ChevronDown size={15} />
-            </button>
+        {activeWorkspace === "agent" ? (
+          <div className="agent-topbar-context">
+            <FilePenLine size={15} />
+            PDF 实时预览与对话修改
+          </div>
+        ) : null}
 
-            {isTargetJobOpen ? (
-              <div className="target-job-popover" role="dialog" aria-label="目标岗位配置">
-                <label className="target-job-popover-field">
-                  <span>岗位名称</span>
-                  <input
-                    type="text"
-                    value={targetRoleDraft}
-                    onChange={(event) => setTargetRoleDraft(event.currentTarget.value)}
-                    placeholder="例如：AI Agent 平台工程师"
-                    disabled={isRunning}
-                  />
-                </label>
-                <label className="target-job-popover-field">
-                  <span>岗位描述（选填）</span>
-                  <textarea
-                    value={targetDescriptionDraft}
-                    onChange={(event) => setTargetDescriptionDraft(event.currentTarget.value)}
-                    placeholder="可以从招聘平台复制 JD，留空则由 Agent 根据岗位名称自行判断。"
-                    disabled={isRunning}
-                    rows={4}
-                  />
-                </label>
-                <div className="target-job-popover-actions">
-                  <button type="button" className="secondary-action" onClick={() => setIsTargetJobOpen(false)}>
-                    取消
-                  </button>
-                  <button type="button" className="target-job-save" onClick={handleSaveTargetJob}>
-                    保存配置
-                  </button>
+        <div className="topbar-identity-menu" ref={floatingMenuRef}>
+          <button
+            className={`topbar-identity-trigger ${isIdentityMenuOpen ? "is-open" : ""}`}
+            type="button"
+            onClick={() => setIsIdentityMenuOpen((prev) => !prev)}
+            aria-label="打开身份设置"
+            aria-expanded={isIdentityMenuOpen}
+          >
+            {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={16} /> : <User size={16} />}
+            <span>{identityLabel}</span>
+            <ChevronDown size={14} />
+          </button>
+
+          {isIdentityMenuOpen ? (
+            <div className="topbar-identity-panel">
+              <div className="topbar-identity-summary">
+                <div className={`topbar-identity-avatar ${identity?.kind === "user" && identity.user.role === "ADMIN" ? "is-admin" : ""}`}>
+                  {identity?.kind === "user" ? identity.user.username.slice(0, 2).toUpperCase() : "G"}
+                </div>
+                <div>
+                  <strong>{identity?.kind === "user" ? identity.user.username : "临时游客"}</strong>
+                  <span>
+                    {identity?.kind === "user" ? (identity.user.role === "ADMIN" ? "系统管理员" : "正式账户") : `游客体验 (剩余 ${guestRemainingTrialCount} 次)`}
+                  </span>
                 </div>
               </div>
-            ) : null}
-          </div>
 
-          <button className="primary-action" type="submit" disabled={isRunning || !canRunReview}>
-            {isRunning ? <LoaderCircle className="spin-icon" size={17} /> : <Play size={17} />}
-            {primaryActionLabel}
-          </button>
-        </form>
+              {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
+                <a className="topbar-identity-action admin-link" href="/admin">
+                  <Shield size={14} />
+                  管理面板
+                </a>
+              ) : null}
+              {identity?.kind === "user" ? (
+                <button className="topbar-identity-action logout-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
+                  <LogOut size={14} />
+                  退出登录
+                </button>
+              ) : (
+                <button className="topbar-identity-action admin-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
+                  <LogOut size={14} style={{ transform: "rotate(180deg)" }} />
+                  登录正式账号
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
       </header>
 
-      {errorMessage ? (
+      {activeWorkspace === "workflow" && errorMessage ? (
         <div className="top-error-banner" role="alert">
           <AlertCircle size={17} />
           <span>{errorMessage}</span>
         </div>
       ) : null}
 
-      <section className="review-workspace">
-        <aside className="workflow-pane">
-          <WorkflowTimeline
-            selectedStage={selectedStage}
-            stagePayloads={stagePayloads}
-            stageStatus={stageStatus}
-            stageStreams={stageStreams}
-            onOpenStageDetails={handleOpenStageDetails}
-            onStartStage={handleStartStage}
-            onInterrupt={handleInterruptReview}
-            isRunningAny={isRunning}
-          />
-        </aside>
+      {activeWorkspace === "workflow" ? (
+        <section className="review-workspace">
+          <aside className="workflow-pane">
+            <div className={`workflow-canvas-controls ${isWorkflowControlsCollapsed ? "is-collapsed" : ""}`}>
+              <div className="workflow-setup-panel">
+                <button
+                  className="workflow-canvas-controls-toggle"
+                  type="button"
+                  onClick={() => setIsWorkflowControlsCollapsed((value) => !value)}
+                  aria-expanded={!isWorkflowControlsCollapsed}
+                >
+                  <BriefcaseBusiness size={15} />
+                  <span>
+                    配置参数
+                    <em>{targetRole ? ` · ${targetRole}` : " · 待配置"}</em>
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
 
-        {detailsStage ? (
-          <StageDetailDrawer
-            finalResult={finalResult}
-            selectedStage={detailsStage}
-            stagePayloads={stagePayloads}
-            stageStatus={stageStatus}
-            stageStreams={stageStreams}
-            onClose={handleCloseStageDetails}
-          />
-        ) : null}
-      </section>
+                {!isWorkflowControlsCollapsed ? (
+                  <div className="workflow-setup-form">
+                    <label className="compact-upload">
+                      <input
+                        type="file"
+                        accept=".txt,.md,.pdf,.docx"
+                        onChange={(event) => {
+                          const nextFile = event.currentTarget.files?.[0] ?? null;
+                          setResumeFile(nextFile);
+                          if (nextFile) {
+                            setCachedResumeFileName(nextFile.name);
+                            setCurrentRunId(null);
+                            setErrorMessage("");
+                          }
+                        }}
+                      />
+                      <Upload size={17} />
+                      <span>{uploadLabel}</span>
+                    </label>
 
-      {/* Floating Identity Hub */}
-      <div className="floating-identity-container" ref={floatingMenuRef}>
-        <button
-          className={`floating-identity-trigger ${isIdentityMenuOpen ? "is-open" : ""}`}
-          type="button"
-          onClick={() => setIsIdentityMenuOpen((prev) => !prev)}
-          aria-label="打开身份设置"
-        >
-          {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={20} /> : <User size={20} />}
-        </button>
+                    <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
+                    <button
+                      className={`target-job-trigger ${targetRole ? "is-configured" : ""}`}
+                      type="button"
+                      onClick={handleToggleTargetJob}
+                      disabled={isRunning}
+                      aria-expanded={isTargetJobOpen}
+                      aria-haspopup="dialog"
+                    >
+                      <BriefcaseBusiness size={16} />
+                      <span className="target-job-trigger-copy">
+                        <strong>目标岗位</strong>
+                        <span>{targetRole || "点击配置岗位名称/描述"}</span>
+                      </span>
+                      <span className={`target-job-state ${targetRole ? "is-configured" : "is-empty"}`}>
+                        {targetRole ? (
+                          <>
+                            <CheckCircle2 size={13} />
+                            已配置
+                          </>
+                        ) : (
+                          "未配置"
+                        )}
+                      </span>
+                      <ChevronDown size={15} />
+                    </button>
 
-        {isIdentityMenuOpen ? (
-          <div className="floating-identity-panel">
-            <div className="floating-identity-userinfo">
-              <div className={`floating-identity-avatar ${identity?.kind === "user" && identity.user.role === "ADMIN" ? "floating-identity-avatar-admin" : ""}`}>
-                {identity?.kind === "user" ? identity.user.username.slice(0, 2).toUpperCase() : "G"}
+                    {isTargetJobOpen ? (
+                      <div className="target-job-popover" role="dialog" aria-label="目标岗位配置">
+                        <label className="target-job-popover-field">
+                          <span>岗位名称</span>
+                          <input
+                            type="text"
+                            value={targetRoleDraft}
+                            onChange={(event) => setTargetRoleDraft(event.currentTarget.value)}
+                            placeholder="例如：AI Agent 平台工程师"
+                            disabled={isRunning}
+                          />
+                        </label>
+                        <label className="target-job-popover-field">
+                          <span>岗位描述（选填）</span>
+                          <textarea
+                            value={targetDescriptionDraft}
+                            onChange={(event) => setTargetDescriptionDraft(event.currentTarget.value)}
+                            placeholder="可以从招聘平台复制 JD，留空则由 Agent 根据岗位名称自行判断。"
+                            disabled={isRunning}
+                            rows={4}
+                          />
+                        </label>
+                        <div className="target-job-popover-actions">
+                          <button type="button" className="secondary-action" onClick={() => setIsTargetJobOpen(false)}>
+                            取消
+                          </button>
+                          <button type="button" className="target-job-save" onClick={handleSaveTargetJob}>
+                            保存配置
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              <div className="floating-identity-text">
-                <span className="floating-identity-name">
-                  {identity?.kind === "user" ? identity.user.username : "临时游客"}
-                </span>
-                <span className="floating-identity-role">
-                  {identity?.kind === "user" ? (identity.user.role === "ADMIN" ? "系统管理员" : "正式账户") : `游客体验 (剩余 ${guestRemainingTrialCount} 次)`}
-                </span>
-              </div>
+
+              <form className="workflow-start-panel" onSubmit={handleSubmit}>
+                <button className="workflow-start-action" type="submit" disabled={isRunning || !canRunReview}>
+                  {isRunning ? <LoaderCircle className="spin-icon" size={17} /> : <Play size={17} />}
+                  <span>{primaryActionLabel}</span>
+                </button>
+              </form>
             </div>
 
-            <div className="floating-identity-actions">
-              {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
-                <a className="floating-identity-action-btn admin-link" href="/admin">
-                  <Shield size={14} />
-                  管理面板
-                </a>
-              ) : null}
-              {identity?.kind === "user" ? (
-                <button className="floating-identity-action-btn logout-btn" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
-                  <LogOut size={14} />
-                  退出登录
-                </button>
-              ) : (
-                <button className="floating-identity-action-btn admin-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }} style={{ fontSize: "0.78rem" }}>
-                  <LogOut size={14} style={{ transform: "rotate(180deg)" }} />
-                  登录正式账号
-                </button>
-              )}
-            </div>
-          </div>
-        ) : null}
-      </div>
+            <WorkflowTimeline
+              selectedStage={selectedStage}
+              stagePayloads={stagePayloads}
+              stageStatus={stageStatus}
+              stageStreams={stageStreams}
+              onOpenStageDetails={handleOpenStageDetails}
+              onStartStage={handleStartStage}
+              onInterrupt={handleInterruptReview}
+              isRunningAny={isRunning}
+            />
+          </aside>
+
+          {detailsStage ? (
+            <StageDetailDrawer
+              finalResult={finalResult}
+              selectedStage={detailsStage}
+              stagePayloads={stagePayloads}
+              stageStatus={stageStatus}
+              stageStreams={stageStreams}
+              onClose={handleCloseStageDetails}
+            />
+          ) : null}
+        </section>
+      ) : (
+        <PdfAgentWorkbench />
+      )}
     </main>
   );
 }

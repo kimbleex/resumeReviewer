@@ -95,6 +95,7 @@ textarea {
 
 .compact-topbar,
 .review-workspace,
+.pdf-agent-workbench,
 .top-error-banner {
   width: 100%;
   max-width: var(--content-width);
@@ -121,6 +122,7 @@ textarea {
 
 .topbar-brand {
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .topbar-brand h1 {
@@ -131,6 +133,7 @@ textarea {
   background: linear-gradient(to right, #ffffff, #d1d5db);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
 }
 
 .topbar-actions {
@@ -138,8 +141,201 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-nav {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.018);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.workspace-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  min-width: 118px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.workspace-nav-button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.workspace-nav-button.is-active {
+  border-color: rgba(0, 242, 254, 0.26);
+  background: rgba(0, 242, 254, 0.105);
+  color: #ffffff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.agent-topbar-context {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   flex: 1;
-  min-width: min(100%, 760px);
+  min-width: 220px;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.topbar-identity-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.topbar-identity-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 250px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 242, 254, 0.2);
+  border-radius: 9px;
+  background: rgba(0, 242, 254, 0.045);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.topbar-identity-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-identity-trigger:hover,
+.topbar-identity-trigger.is-open {
+  border-color: rgba(0, 242, 254, 0.48);
+  background: rgba(0, 242, 254, 0.09);
+  transform: translateY(-1px);
+}
+
+.topbar-identity-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 95;
+  width: 260px;
+  padding: 14px;
+  border: 1px solid rgba(0, 242, 254, 0.16);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    var(--bg-elevated);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: floatingPanelIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.topbar-identity-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar-identity-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(0, 242, 254, 0.28);
+  border-radius: 99px;
+  background: rgba(0, 242, 254, 0.08);
+  color: var(--cyan);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.topbar-identity-avatar.is-admin {
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--gold);
+}
+
+.topbar-identity-summary div:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar-identity-summary strong {
+  color: var(--text);
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-identity-summary span {
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+.topbar-identity-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.topbar-identity-action.admin-link {
+  border: 1px solid rgba(0, 242, 254, 0.26);
+  background: rgba(0, 242, 254, 0.055);
+  color: var(--cyan);
+}
+
+.topbar-identity-action.logout-link {
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.045);
+  color: var(--red-dim);
+}
+
+.topbar-identity-action:hover {
+  transform: translateY(-1px);
 }
 
 .identity-strip {
@@ -612,6 +808,600 @@ textarea {
   border-radius: 8px;
 }
 
+.workflow-canvas-controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(clamp(300px, 32vw, 440px), calc(100% - 32px));
+  overflow: visible;
+}
+
+.workflow-canvas-controls.is-collapsed {
+  width: min(clamp(280px, 24vw, 360px), calc(100% - 32px));
+}
+
+.workflow-setup-panel,
+.workflow-start-panel {
+  border: 1px solid rgba(0, 242, 254, 0.14);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    rgba(8, 10, 14, 0.9);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+  overflow: visible;
+}
+
+.workflow-setup-panel {
+  padding: 8px;
+}
+
+.workflow-start-panel {
+  padding: 6px;
+}
+
+.workflow-canvas-controls-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.workflow-canvas-controls-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-canvas-controls-toggle em {
+  color: var(--text-dim);
+  font-style: normal;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workflow-canvas-controls-toggle > svg:last-child {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  transition: transform 0.18s ease;
+}
+
+.workflow-canvas-controls:not(.is-collapsed) .workflow-canvas-controls-toggle > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.workflow-setup-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.workflow-setup-form .compact-upload {
+  width: 100%;
+  max-width: none;
+  min-height: 44px;
+  justify-content: flex-start;
+}
+
+.workflow-setup-form .target-job-config {
+  min-width: 0;
+}
+
+.workflow-setup-form .target-job-trigger {
+  width: 100%;
+  min-height: 48px;
+}
+
+.workflow-start-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(0, 242, 254, 0.26);
+  border-radius: 10px;
+  background: rgba(0, 242, 254, 0.075);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 900;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.workflow-start-action:hover:not(:disabled) {
+  border-color: rgba(0, 242, 254, 0.48);
+  background: rgba(0, 242, 254, 0.12);
+  transform: translateY(-1px);
+}
+
+.workflow-start-action:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.pdf-agent-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(360px, 0.9fr);
+  flex: 1;
+  min-height: 0;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.pdf-preview-panel,
+.pdf-agent-panel {
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006)),
+    var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.pdf-preview-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.pdf-preview-header,
+.pdf-agent-header,
+.pdf-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pdf-preview-header h2,
+.pdf-agent-header h2 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.panel-kicker {
+  display: inline-flex;
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.pdf-upload-button,
+.pdf-preview-actions button,
+.pdf-preview-actions a,
+.agent-prompt-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-decoration: none;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.pdf-upload-button {
+  padding: 0 13px;
+  border: 1px dashed rgba(245, 158, 11, 0.34);
+  background: rgba(245, 158, 11, 0.055);
+  color: #fbbf24;
+}
+
+.pdf-upload-button input {
+  display: none;
+}
+
+.pdf-upload-button:hover,
+.pdf-preview-actions button:hover:not(:disabled),
+.pdf-preview-actions a:hover:not(.is-disabled),
+.agent-prompt-form button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.pdf-preview-surface {
+  min-height: 0;
+  padding: 12px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    #050609;
+  background-size: 18px 18px;
+}
+
+.pdf-preview-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #111318;
+}
+
+.pdf-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  min-height: 420px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.pdf-empty-state strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.pdf-empty-state span {
+  max-width: 430px;
+  font-size: 0.82rem;
+}
+
+.pdf-preview-toolbar {
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+  padding: 12px 16px;
+}
+
+.pdf-version-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pdf-version-meta strong,
+.pdf-version-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-version-meta strong {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.pdf-version-meta span {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+
+.pdf-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pdf-preview-actions button,
+.pdf-preview-actions a {
+  padding: 0 12px;
+  border: 1px solid rgba(0, 242, 254, 0.22);
+  background: rgba(0, 242, 254, 0.045);
+  color: var(--cyan);
+}
+
+.pdf-preview-actions button:disabled,
+.pdf-preview-actions a.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.pdf-agent-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(80px, 0.8fr) minmax(220px, 1.35fr) auto auto;
+  overflow: hidden;
+}
+
+.pdf-agent-header {
+  padding: 14px;
+}
+
+.agent-run-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.055);
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.agent-run-state.is-running {
+  border-color: rgba(0, 242, 254, 0.3);
+  background: rgba(0, 242, 254, 0.07);
+  color: var(--cyan);
+}
+
+.pdf-agent-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(239, 68, 68, 0.24);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.055);
+  color: var(--red-dim);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.agent-message-list,
+.agent-stage-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.agent-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.agent-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.agent-message-user {
+  border-color: rgba(245, 158, 11, 0.18);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.agent-message span {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.agent-message p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.agent-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-stage-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.agent-stage-running {
+  border-color: rgba(0, 242, 254, 0.2);
+  background: rgba(0, 242, 254, 0.045);
+}
+
+.agent-stage-done {
+  border-color: rgba(16, 185, 129, 0.18);
+}
+
+.agent-stage-failed {
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.agent-stage-marker {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  color: var(--text-dim);
+}
+
+.agent-stage-running .agent-stage-marker {
+  color: var(--cyan);
+}
+
+.agent-stage-done .agent-stage-marker {
+  color: var(--green);
+}
+
+.agent-stage-failed .agent-stage-marker {
+  color: var(--red-dim);
+}
+
+.agent-stage-spinner {
+  animation: spin 0.85s linear infinite;
+}
+
+.agent-stage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.agent-stage-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-stage-heading strong {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.agent-stage-heading span,
+.agent-stage-body p {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.agent-stage-body p {
+  margin: 0;
+}
+
+.agent-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-tool-call {
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.045);
+  overflow: hidden;
+}
+
+.agent-tool-call summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-tool-call summary span {
+  color: #fbbf24;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.agent-tool-call summary em {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.agent-tool-result strong {
+  color: var(--text);
+  font-size: 0.68rem;
+}
+
+.agent-tool-result span {
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.agent-prompt-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.agent-prompt-form textarea {
+  min-height: 72px;
+  max-height: 120px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  outline: none;
+  padding: 10px 11px;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.agent-prompt-form textarea:focus {
+  border-color: rgba(0, 242, 254, 0.36);
+  box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.07);
+}
+
+.agent-prompt-form button {
+  align-self: stretch;
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.18), rgba(16, 185, 129, 0.08));
+  color: var(--text);
+}
+
+.agent-prompt-form button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.agent-runtime-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px 12px;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
 .review-workspace {
   display: flex;
   flex: 1;
@@ -620,6 +1410,7 @@ textarea {
 }
 
 .workflow-pane {
+  position: relative;
   min-height: 0;
   height: 100%;
   contain: layout paint style;

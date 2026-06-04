@@ -9,6 +9,7 @@ const source = [
   "./review-studio.tsx",
   "./review-stage-detail.tsx",
   "./review-studio-shared.ts",
+  "./pdf-agent-workbench.tsx",
 ]
   .map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"))
   .join("\n");
