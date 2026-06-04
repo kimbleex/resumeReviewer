@@ -2702,18 +2702,6 @@ button.admin-stat-card.clickable:hover .admin-stat-peek {
   white-space: nowrap;
 }
 
-.clean-report-shell .priority-list {
-  margin: 0;
-  padding-left: 22px;
-}
-
-.clean-report-shell .priority-list li {
-  padding-left: 4px;
-  color: rgba(226, 232, 240, 0.86);
-  font-size: 0.84rem;
-  line-height: 1.58;
-}
-
 .clean-report-shell .dimension-scores-box {
   gap: 8px;
 }
