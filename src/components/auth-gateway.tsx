@@ -83,9 +83,16 @@ function getFingerprint() {
   };
 }
 
-export function AuthGateway() {
-  const [identity, setIdentity] = useState<ReviewIdentity | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+export function AuthGateway({
+  initialIdentity,
+}: {
+  initialIdentity?: ReviewIdentity | null;
+} = {}) {
+  // When the server already resolved identity (including a definitive `null`),
+  // seed state from it and skip the initial client-side request waterfall.
+  const hasServerIdentity = initialIdentity !== undefined;
+  const [identity, setIdentity] = useState<ReviewIdentity | null>(initialIdentity ?? null);
+  const [isLoading, setIsLoading] = useState(!hasServerIdentity);
   const [isClaimingGuest, setIsClaimingGuest] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   
@@ -100,7 +107,9 @@ export function AuthGateway() {
   // Track whether the very first identity fetch has completed.
   // After that, refreshIdentity will update identity silently in the background
   // without unmounting ReviewStudio (which would destroy in-flight streams).
-  const hasLoadedOnceRef = useRef(false);
+  // When the server already provided identity, treat the first load as done so
+  // any later refresh runs silently (no full-screen spinner).
+  const hasLoadedOnceRef = useRef(hasServerIdentity);
 
   const refreshIdentity = useCallback(async () => {
     const isInitialLoad = !hasLoadedOnceRef.current;
@@ -138,7 +147,14 @@ export function AuthGateway() {
   }, []);
 
   useEffect(() => {
-    void refreshIdentity();
+    // The server resolves identity for the common case (valid access token or
+    // guest cookie). Only fetch on mount when the server had no definitive
+    // answer (no SSR, or SSR returned null — e.g. access token expired but the
+    // refresh token may still be valid). This runs silently since
+    // hasLoadedOnceRef was seeded true when SSR provided an answer.
+    if (!hasServerIdentity || initialIdentity === null) {
+      void refreshIdentity();
+    }
 
     // Proactively refresh the access token every 90 minutes (token lives 2h).
     // This keeps the session alive during very long diagnostic runs without
@@ -148,7 +164,7 @@ export function AuthGateway() {
     }, 90 * 60 * 1000);
 
     return () => clearInterval(proactiveRefreshTimer);
-  }, [refreshIdentity]);
+  }, [refreshIdentity, hasServerIdentity, initialIdentity]);
 
   // Guest claim registration handler
   const handleGuestTrial = useCallback(async () => {
