@@ -17,6 +17,10 @@ function resolveSuffix(fileName: string): string {
   return match?.[1]?.toLowerCase() ?? "";
 }
 
+export async function extractResumeText(fileName: string, buffer: Buffer): Promise<string> {
+  return readBufferContent(fileName, buffer);
+}
+
 async function readBufferContent(fileName: string, buffer: Buffer): Promise<string> {
   const suffix = resolveSuffix(fileName);
 

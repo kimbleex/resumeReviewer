@@ -5,88 +5,43 @@ import {
   AlertCircle,
   Bot,
   CheckCircle2,
-  ChevronRight,
   Download,
   FileText,
   LoaderCircle,
   RefreshCw,
   Send,
   Upload,
-  Wand2,
 } from "lucide-react";
 
-type AgentStageStatus = "idle" | "running" | "done" | "failed";
+type TraceStepStatus = "running" | "done" | "failed";
 
-type AgentToolCall = {
+type TraceStep = {
   id: string;
-  name: string;
-  status: AgentStageStatus;
-  result: string;
-  details: string[];
+  tag: "agent" | "model";
+  title: string;
+  detail?: string;
+  status: TraceStepStatus;
 };
 
-type AgentStage = {
-  id: string;
-  label: string;
-  description: string;
-  status: AgentStageStatus;
-  summary: string;
-  toolCalls: AgentToolCall[];
-};
+type AgentTurnStatus = "running" | "done" | "failed";
 
-type AgentMessage = {
+type AgentTurn = {
   id: string;
-  role: "user" | "assistant";
-  text: string;
+  prompt: string;
   createdAt: string;
+  steps: TraceStep[];
+  answer: string;
+  citation: string;
+  status: AgentTurnStatus;
+  error: string;
 };
 
-const PDF_AGENT_STAGES = [
-  {
-    id: "read_pdf",
-    label: "读取 PDF",
-    description: "确认文件、版本和浏览器预览状态",
-  },
-  {
-    id: "understand_intent",
-    label: "理解修改意图",
-    description: "提取用户目标并规划简历修改范围",
-  },
-  {
-    id: "tool_calling",
-    label: "调用工具",
-    description: "调用文本抽取、结构规划与重写工具",
-  },
-  {
-    id: "rewrite_content",
-    label: "修改内容",
-    description: "按岗位目标压缩、强化或重写内容",
-  },
-  {
-    id: "adjust_style",
-    label: "调整样式",
-    description: "校准版式密度、标题层级和可读性",
-  },
-  {
-    id: "render_pdf",
-    label: "生成 PDF",
-    description: "生成新版本并准备替换预览",
-  },
-  {
-    id: "refresh_preview",
-    label: "刷新预览",
-    description: "更新左侧浏览器 PDF 预览",
-  },
-] as const;
-
-function createInitialAgentStages(): AgentStage[] {
-  return PDF_AGENT_STAGES.map((stage) => ({
-    ...stage,
-    status: "idle",
-    summary: "等待执行",
-    toolCalls: [],
-  }));
-}
+// 与后端 src/lib/agents/resume-edit.ts 的 ResumeAgentEvent 保持一致。
+type AgentEvent =
+  | { type: "step"; id: string; tag: "agent" | "model"; title: string; detail?: string; status: TraceStepStatus }
+  | { type: "answer-delta"; text: string }
+  | { type: "done"; citation: string }
+  | { type: "error"; message: string };
 
 function formatTime(date = new Date()) {
   return date.toLocaleTimeString("zh-CN", {
@@ -97,111 +52,71 @@ function formatTime(date = new Date()) {
   });
 }
 
-function makeMessageId() {
-  return globalThis.crypto?.randomUUID?.() ?? `message-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function makeId() {
+  return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function createToolCall(stageId: string, prompt: string): AgentToolCall | null {
-  const shortPrompt = prompt.length > 42 ? `${prompt.slice(0, 42)}...` : prompt;
+const TRACE_TAG_LABEL: Record<TraceStep["tag"], string> = {
+  agent: "agent",
+  model: "model request",
+};
 
-  if (stageId === "tool_calling") {
-    return {
-      id: "extract_resume_text",
-      name: "extract_resume_text",
-      status: "done",
-      result: "已抽取关键段落，准备结构化修改。",
-      details: ["识别到教育、项目、经历和技能区块。", "仅保留精简摘要，避免在前端保存大段原文。"],
-    };
-  }
-
-  if (stageId === "rewrite_content") {
-    return {
-      id: "rewrite_resume_section",
-      name: "rewrite_resume_section",
-      status: "done",
-      result: `围绕“${shortPrompt}”生成修改草案。`,
-      details: ["突出可量化成果和岗位关键词。", "默认保持 PDF 当前版式，等待后端渲染接口接入。"],
-    };
-  }
-
-  if (stageId === "render_pdf") {
-    return {
-      id: "render_pdf",
-      name: "render_pdf",
-      status: "done",
-      result: "PDF 渲染接口已预留，当前版本复用本地预览。",
-      details: ["后端返回新 PDF Blob 后会替换当前预览地址。", "下载按钮始终指向当前最新预览。"],
-    };
-  }
-
-  return null;
-}
-
-function stageDoneSummary(stageId: string) {
-  switch (stageId) {
-    case "read_pdf":
-      return "PDF 已载入，预览可用。";
-    case "understand_intent":
-      return "已拆解修改目标和影响范围。";
-    case "tool_calling":
-      return "工具调用完成。";
-    case "rewrite_content":
-      return "内容修改草案已生成。";
-    case "adjust_style":
-      return "样式调整策略已确认。";
-    case "render_pdf":
-      return "新版本生成步骤完成。";
-    case "refresh_preview":
-      return "预览已刷新。";
-    default:
-      return "阶段完成。";
-  }
-}
-
-const AgentStageRow = memo(function AgentStageRow({ stage }: { stage: AgentStage }) {
-  const isRunning = stage.status === "running";
-  const isDone = stage.status === "done";
-  const isFailed = stage.status === "failed";
-
+const AgentTraceStep = memo(function AgentTraceStep({ step }: { step: TraceStep }) {
   return (
-    <article className={`agent-stage-row agent-stage-${stage.status}`}>
-      <div className="agent-stage-marker" aria-hidden="true">
-        {isRunning ? (
+    <div className={`agent-trace-step is-${step.status}`}>
+      <span className="agent-trace-icon" aria-hidden="true">
+        {step.status === "running" ? (
           <LoaderCircle className="agent-stage-spinner" size={15} />
-        ) : isDone ? (
-          <CheckCircle2 size={15} />
-        ) : isFailed ? (
+        ) : step.status === "failed" ? (
           <AlertCircle size={15} />
         ) : (
-          <ChevronRight size={15} />
+          <CheckCircle2 size={15} />
         )}
-      </div>
-      <div className="agent-stage-body">
-        <div className="agent-stage-heading">
-          <strong>{stage.label}</strong>
-          <span>{stage.description}</span>
+      </span>
+      <div className="agent-trace-body">
+        <div className="agent-trace-line">
+          <span className={`agent-trace-tag tag-${step.tag}`}>{TRACE_TAG_LABEL[step.tag]}</span>
+          <strong className="agent-trace-title">{step.title}</strong>
         </div>
-        <p>{stage.summary}</p>
-        {stage.toolCalls.length > 0 ? (
-          <div className="agent-tool-list">
-            {stage.toolCalls.map((tool) => (
-              <details className="agent-tool-call" key={tool.id}>
-                <summary>
-                  <span>{tool.name}</span>
-                  <em>{tool.result}</em>
-                </summary>
-                <div className="agent-tool-result">
-                  <strong>精简结果</strong>
-                  {tool.details.map((detail) => (
-                    <span key={detail}>{detail}</span>
-                  ))}
-                </div>
-              </details>
-            ))}
-          </div>
-        ) : null}
+        {step.detail ? <code className="agent-trace-detail">{step.detail}</code> : null}
       </div>
-    </article>
+    </div>
+  );
+});
+
+const AgentTurnView = memo(function AgentTurnView({ turn }: { turn: AgentTurn }) {
+  const showAnswer = turn.answer.length > 0 || turn.status === "done";
+
+  return (
+    <div className="agent-turn">
+      <div className="agent-chat-message agent-chat-message-user">
+        <span>xjl · {turn.createdAt}</span>
+        <p>{turn.prompt}</p>
+      </div>
+
+      {turn.steps.map((step) => (
+        <AgentTraceStep key={step.id} step={step} />
+      ))}
+
+      {turn.error ? (
+        <div className="pdf-agent-error" role="alert">
+          <AlertCircle size={15} />
+          {turn.error}
+        </div>
+      ) : null}
+
+      {showAnswer ? (
+        <div className="agent-answer">
+          <div className="agent-answer-head">
+            <span className="agent-answer-avatar">RA</span>
+            {turn.citation ? <span className="agent-answer-citation">{turn.citation}</span> : null}
+          </div>
+          <div className="agent-answer-body">
+            <p>{turn.answer || (turn.status === "running" ? "正在生成回答…" : "")}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 });
 
@@ -212,47 +127,47 @@ export function PdfAgentWorkbench() {
   const [pdfFrameKey, setPdfFrameKey] = useState(0);
   const [lastUpdatedAt, setLastUpdatedAt] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "上传 PDF 后，可以直接告诉我想改内容、风格、密度或岗位匹配方向。",
-      createdAt: formatTime(),
-    },
-  ]);
-  const [agentStages, setAgentStages] = useState<AgentStage[]>(createInitialAgentStages);
+  const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentError, setAgentError] = useState("");
   const objectUrlRef = useRef("");
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isMountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const resizePromptTextarea = useCallback(() => {
+    const textarea = promptTextareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    const nextHeight = Math.min(textarea.scrollHeight, 82);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 82 ? "auto" : "hidden";
+  }, []);
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      timersRef.current.forEach((timer) => clearTimeout(timer));
+      abortRef.current?.abort();
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
       }
     };
   }, []);
 
-  const clearTimers = useCallback(() => {
-    timersRef.current.forEach((timer) => clearTimeout(timer));
-    timersRef.current = [];
-  }, []);
+  useEffect(() => {
+    resizePromptTextarea();
+  }, [prompt, resizePromptTextarea]);
 
-  const wait = useCallback(
-    (duration: number) =>
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          timersRef.current = timersRef.current.filter((item) => item !== timer);
-          resolve();
-        }, duration);
-        timersRef.current.push(timer);
-      }),
-    [],
-  );
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [turns]);
 
   const downloadName = useMemo(() => {
     if (!pdfFile) {
@@ -261,6 +176,10 @@ export function PdfAgentWorkbench() {
     const baseName = pdfFile.name.replace(/\.pdf$/i, "");
     return `${baseName}-agent-v${Math.max(pdfPreviewVersion, 1)}.pdf`;
   }, [pdfFile, pdfPreviewVersion]);
+
+  const updateTurn = useCallback((turnId: string, updater: (turn: AgentTurn) => AgentTurn) => {
+    setTurns((current) => current.map((turn) => (turn.id === turnId ? updater(turn) : turn)));
+  }, []);
 
   const handlePdfUpload = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.currentTarget.files?.[0] ?? null;
@@ -286,7 +205,7 @@ export function PdfAgentWorkbench() {
     setPdfFrameKey((current) => current + 1);
     setLastUpdatedAt(formatTime());
     setAgentError("");
-    setAgentStages(createInitialAgentStages());
+    setTurns([]);
   }, []);
 
   const handleRefreshPreview = useCallback(() => {
@@ -299,11 +218,16 @@ export function PdfAgentWorkbench() {
     setAgentError("");
   }, [pdfPreviewUrl]);
 
-  const updateStage = useCallback((stageId: string, patch: Partial<AgentStage>) => {
-    setAgentStages((currentStages) =>
-      currentStages.map((stage) => (stage.id === stageId ? { ...stage, ...patch } : stage)),
-    );
-  }, []);
+  const handleClearAgent = useCallback(() => {
+    if (isAgentRunning) {
+      return;
+    }
+
+    setAgentError("");
+    setPrompt("");
+    setTurns([]);
+    requestAnimationFrame(resizePromptTextarea);
+  }, [isAgentRunning, resizePromptTextarea]);
 
   const handleSendPrompt = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -322,69 +246,135 @@ export function PdfAgentWorkbench() {
         return;
       }
 
-      clearTimers();
       setAgentError("");
       setIsAgentRunning(true);
       setPrompt("");
-      setAgentStages(createInitialAgentStages());
-      setAgentMessages((messages) => [
-        ...messages,
+
+      const turnId = makeId();
+      setTurns((current) => [
+        ...current,
         {
-          id: makeMessageId(),
-          role: "user",
-          text: trimmedPrompt,
+          id: turnId,
+          prompt: trimmedPrompt,
           createdAt: formatTime(),
+          steps: [],
+          answer: "",
+          citation: "",
+          status: "running",
+          error: "",
         },
       ]);
 
-      try {
-        for (const stage of PDF_AGENT_STAGES) {
-          if (!isMountedRef.current) {
-            return;
-          }
-          updateStage(stage.id, {
-            status: "running",
-            summary: "正在执行...",
-            toolCalls: [],
-          });
-          await wait(280);
-          const toolCall = createToolCall(stage.id, trimmedPrompt);
-          updateStage(stage.id, {
-            status: "done",
-            summary: stageDoneSummary(stage.id),
-            toolCalls: toolCall ? [toolCall] : [],
-          });
-        }
+      const controller = new AbortController();
+      abortRef.current = controller;
 
+      const applyEvent = (eventPayload: AgentEvent) => {
         if (!isMountedRef.current) {
           return;
         }
-
-        setPdfPreviewVersion((version) => version + 1);
-        setPdfFrameKey((current) => current + 1);
-        setLastUpdatedAt(formatTime());
-        setAgentMessages((messages) => [
-          ...messages,
-          {
-            id: makeMessageId(),
-            role: "assistant",
-            text: "已完成本轮修改流程。当前版本仍使用本地 PDF 预览，后端生成接口接入后会自动替换为新文件。",
-            createdAt: formatTime(),
-          },
-        ]);
-      } catch {
-        updateStage(PDF_AGENT_STAGES[0].id, {
-          status: "failed",
-          summary: "执行失败，请重试。",
+        updateTurn(turnId, (turn) => {
+          switch (eventPayload.type) {
+            case "step": {
+              const nextStep: TraceStep = {
+                id: eventPayload.id,
+                tag: eventPayload.tag,
+                title: eventPayload.title,
+                detail: eventPayload.detail,
+                status: eventPayload.status,
+              };
+              const existingIndex = turn.steps.findIndex((step) => step.id === eventPayload.id);
+              const steps =
+                existingIndex >= 0
+                  ? turn.steps.map((step, index) => (index === existingIndex ? nextStep : step))
+                  : [...turn.steps, nextStep];
+              return { ...turn, steps };
+            }
+            case "answer-delta":
+              return { ...turn, answer: turn.answer + eventPayload.text };
+            case "done":
+              return {
+                ...turn,
+                citation: eventPayload.citation,
+                status: "done",
+                steps: turn.steps.map((step) =>
+                  step.status === "running" ? { ...step, status: "done" } : step,
+                ),
+              };
+            case "error":
+              return {
+                ...turn,
+                status: "failed",
+                error: eventPayload.message,
+                steps: turn.steps.map((step) =>
+                  step.status === "running" ? { ...step, status: "failed" } : step,
+                ),
+              };
+            default:
+              return turn;
+          }
         });
-        setAgentError("Agent 执行失败，请稍后重试。");
+      };
+
+      try {
+        const formData = new FormData();
+        formData.append("pdfFile", pdfFile);
+        formData.append("prompt", trimmedPrompt);
+
+        const response = await fetch("/api/pdf-agent", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`请求失败（${response.status}）`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIndex = buffer.indexOf("\n");
+          while (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (line) {
+              try {
+                applyEvent(JSON.parse(line) as AgentEvent);
+              } catch {
+                // 跳过无法解析的行，保持流式继续。
+              }
+            }
+            newlineIndex = buffer.indexOf("\n");
+          }
+        }
+
+        if (isMountedRef.current) {
+          updateTurn(turnId, (turn) => (turn.status === "running" ? { ...turn, status: "done" } : turn));
+        }
+      } catch (error) {
+        if (!isMountedRef.current || controller.signal.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Agent 执行失败，请稍后重试。";
+        updateTurn(turnId, (turn) => ({ ...turn, status: "failed", error: message }));
+        setAgentError(message);
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         if (isMountedRef.current) {
           setIsAgentRunning(false);
         }
       }
     },
-    [clearTimers, isAgentRunning, pdfFile, pdfPreviewUrl, prompt, updateStage, wait],
+    [isAgentRunning, pdfFile, pdfPreviewUrl, prompt, updateTurn],
   );
 
   return (
@@ -447,55 +437,63 @@ export function PdfAgentWorkbench() {
       <aside className="pdf-agent-panel">
         <div className="pdf-agent-header">
           <div>
-            <span className="panel-kicker">AGENT CONSOLE</span>
-            <h2>对话修改</h2>
-          </div>
-          <span className={`agent-run-state ${isAgentRunning ? "is-running" : ""}`}>
-            {isAgentRunning ? <LoaderCircle className="agent-stage-spinner" size={14} /> : <Bot size={14} />}
-            {isAgentRunning ? "执行中" : "就绪"}
-          </span>
-        </div>
-
-        {agentError ? (
-          <div className="pdf-agent-error" role="alert">
-            <AlertCircle size={15} />
-            {agentError}
-          </div>
-        ) : null}
-
-        <div className="agent-message-list" aria-label="Agent 对话记录">
-          {agentMessages.map((message) => (
-            <div className={`agent-message agent-message-${message.role}`} key={message.id}>
-              <span>{message.role === "user" ? "你" : "Agent"} · {message.createdAt}</span>
-              <p>{message.text}</p>
+            <div className="pdf-agent-title-row">
+              <h2>RA</h2>
+              <span className={`agent-run-state ${isAgentRunning ? "is-running" : ""}`}>
+                {isAgentRunning ? <LoaderCircle className="agent-stage-spinner" size={14} /> : <Bot size={14} />}
+                {isAgentRunning ? "运行中" : "就绪"}
+              </span>
             </div>
-          ))}
+            <p>Resume Assistant Agent</p>
+          </div>
+          <button type="button" className="agent-clear-button" onClick={handleClearAgent} disabled={isAgentRunning}>
+            清空
+          </button>
         </div>
 
-        <div className="agent-stage-list" aria-label="Agent 执行阶段">
-          {agentStages.map((stage) => (
-            <AgentStageRow key={stage.id} stage={stage} />
+        <div className="agent-conversation-scroll" ref={scrollRef} aria-label="Agent 对话和执行过程">
+          {agentError && turns.length === 0 ? (
+            <div className="pdf-agent-error" role="alert">
+              <AlertCircle size={15} />
+              {agentError}
+            </div>
+          ) : null}
+
+          {turns.length === 0 && !agentError ? (
+            <div className="agent-empty-hint">
+              <Bot size={26} />
+              <strong>告诉 RA 你想怎么改这份简历</strong>
+              <span>RA 会先解析 PDF，再按你的要求修改；与改简历无关的问题会被拒绝。</span>
+            </div>
+          ) : null}
+
+          {turns.map((turn) => (
+            <AgentTurnView key={turn.id} turn={turn} />
           ))}
         </div>
 
         <form className="agent-prompt-form" onSubmit={handleSendPrompt}>
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.currentTarget.value)}
-            placeholder="例如：把项目经历改得更偏后端架构，并压缩成更适合两页的表达。"
-            rows={3}
-            disabled={isAgentRunning}
-          />
-          <button type="submit" disabled={isAgentRunning}>
-            {isAgentRunning ? <LoaderCircle className="agent-stage-spinner" size={16} /> : <Send size={16} />}
-            发送
-          </button>
+          <div className="agent-prompt-shell">
+            <textarea
+              ref={promptTextareaRef}
+              value={prompt}
+              onChange={(event) => setPrompt(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              aria-label="输入简历修改要求"
+              rows={1}
+              disabled={isAgentRunning}
+            />
+            <button type="submit" className="agent-send-button" disabled={isAgentRunning}>
+              {isAgentRunning ? <LoaderCircle className="agent-stage-spinner" size={16} /> : <Send size={16} />}
+              发送
+            </button>
+          </div>
         </form>
-
-        <div className="agent-runtime-note">
-          <Wand2 size={14} />
-          <span>当前为前端执行流，真实 PDF 生成接口接入后会自动替换预览文件。</span>
-        </div>
       </aside>
     </section>
   );

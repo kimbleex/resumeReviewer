@@ -50,9 +50,15 @@ test("workflow upload target and start controls live inside the canvas as a coll
   assert.match(studioSource, /workflow-start-action/);
   assert.doesNotMatch(studioSource, /workflow-command-dock/);
   assert.match(cssRule(".workflow-canvas-controls"), /position:\s*absolute/);
-  assert.match(cssRule(".workflow-canvas-controls"), /width:\s*min\(clamp\(300px,\s*32vw,\s*440px\),\s*calc\(100%\s*-\s*32px\)\)/);
+  assert.match(cssRule(".workflow-canvas-controls"), /width:\s*min\(clamp\(300px,\s*24vw,\s*340px\),\s*calc\(100%\s*-\s*32px\)\)/);
+  assert.doesNotMatch(cssRule(".workflow-canvas-controls.is-collapsed"), /width:/);
   assert.match(cssRule(".workflow-setup-form"), /grid-template-columns:\s*1fr/);
   assert.doesNotMatch(cssRule(".workflow-setup-form"), /max-content/);
+  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /width:\s*100%/);
+  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /right:\s*auto/);
+  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /z-index:\s*160/);
+  assert.doesNotMatch(cssRule(".workflow-pane"), /contain:\s*layout\s+paint\s+style/);
+  assert.match(cssRule(".workflow-canvas-controls"), /z-index:\s*120/);
 });
 
 test("PDF agent workbench uses native object URL PDF preview with refresh and download controls", () => {
@@ -65,17 +71,54 @@ test("PDF agent workbench uses native object URL PDF preview with refresh and do
   assert.doesNotMatch(workbenchSource, /pdfjs|pdf\.js/i);
 });
 
-test("PDF agent stages show running animation and collapsible concise tool results", () => {
-  assert.match(workbenchSource, /PDF_AGENT_STAGES/);
+test("PDF agent drives dynamic trace steps from the real streaming endpoint", () => {
+  // 不再使用写死的步骤，改为消费后端真实流式事件。
+  assert.doesNotMatch(workbenchSource, /PDF_AGENT_STAGES/);
+  assert.doesNotMatch(workbenchSource, /agent-tool-call|精简结果/);
+  assert.match(workbenchSource, /\/api\/pdf-agent/);
+  assert.match(workbenchSource, /getReader\(\)/);
+  assert.match(workbenchSource, /answer-delta/);
+  assert.match(workbenchSource, /agent-trace-step/);
   assert.match(workbenchSource, /agent-stage-spinner/);
-  assert.match(workbenchSource, /<details className="agent-tool-call"/);
-  assert.match(workbenchSource, /summary/);
-  assert.match(workbenchSource, /精简结果/);
   assert.doesNotMatch(workbenchSource, /rawModelOutput|streamContent|reasoningText/);
+  assert.match(cssRule(".agent-trace-tag.tag-model"), /color:\s*#c4b5fd/);
 });
 
 test("PDF agent workbench has a fixed PC split layout", () => {
-  assert.match(cssRule(".pdf-agent-workbench"), /grid-template-columns:\s*minmax\(0,\s*1\.9fr\)\s+minmax\(360px,\s*0\.9fr\)/);
+  assert.match(cssRule(".pdf-agent-workbench"), /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/);
+  assert.match(cssRule(".pdf-agent-workbench"), /align-items:\s*stretch/);
   assert.match(cssRule(".pdf-preview-frame"), /width:\s*100%/);
   assert.match(cssRule(".pdf-agent-panel"), /overflow:\s*hidden/);
+});
+
+test("PDF agent page presents a chat-style agent workspace", () => {
+  assert.match(workbenchSource, /agent-conversation-scroll/);
+  assert.match(workbenchSource, /agent-chat-message-user/);
+  assert.match(workbenchSource, /agent-prompt-shell/);
+  assert.match(workbenchSource, /promptTextareaRef/);
+  assert.match(workbenchSource, /resizePromptTextarea/);
+  assert.match(workbenchSource, /style\.height\s*=\s*"auto"/);
+  assert.match(workbenchSource, /AgentTurnView/);
+  assert.match(workbenchSource, /清空/);
+  assert.doesNotMatch(workbenchSource, /Maximize2|agent-expand-button|展开输入框/);
+  assert.match(cssRule(".pdf-agent-panel"), /var\(--bg-elevated\)/);
+  assert.doesNotMatch(cssRule(".pdf-agent-panel"), /#f8fafc|#ffffff|#fff\b/);
+  assert.match(cssRule(".agent-conversation-scroll"), /overflow-y:\s*auto/);
+  assert.match(cssRule(".agent-conversation-scroll"), /background:\s*#050609/);
+  assert.match(cssRule(".agent-chat-message-user"), /align-self:\s*flex-end/);
+  assert.doesNotMatch(cssRule(".agent-prompt-form"), /(?:^|\n)\s*height:\s*52px/);
+  assert.match(cssRule(".agent-prompt-form"), /min-height:\s*52px/);
+  assert.match(cssRule(".pdf-preview-header"), /height:\s*58px/);
+  assert.match(cssRule(".pdf-preview-header"), /min-height:\s*58px/);
+  assert.match(styles, /\.pdf-preview-toolbar\s*\{[^}]*height:\s*52px[^}]*min-height:\s*52px/s);
+  assert.match(cssRule(".pdf-agent-header"), /height:\s*58px/);
+  assert.match(cssRule(".pdf-agent-header"), /min-height:\s*58px/);
+  assert.match(cssRule(".agent-prompt-shell"), /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+78px/);
+  assert.match(cssRule(".agent-prompt-shell"), /align-items:\s*end/);
+  assert.match(cssRule(".agent-prompt-form textarea"), /max-height:\s*82px/);
+  assert.match(cssRule(".agent-prompt-form textarea"), /overflow:\s*hidden/);
+  assert.match(cssRule(".agent-send-button"), /min-height:\s*30px/);
+  assert.doesNotMatch(workbenchSource, /上传 PDF 后，可以直接告诉/);
+  assert.doesNotMatch(workbenchSource, /例如：/);
+  assert.doesNotMatch(workbenchSource, /\{agentStages\.map/);
 });
