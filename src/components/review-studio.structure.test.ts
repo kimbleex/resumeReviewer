@@ -2,7 +2,16 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const source = readFileSync(new URL("./review-studio.tsx", import.meta.url), "utf8");
+// The review studio is split across the main container plus the lazily-loaded
+// stage-detail panels and a shared helpers module. Assertions about behavior
+// should hold across the combined source regardless of which file owns a piece.
+const source = [
+  "./review-studio.tsx",
+  "./review-stage-detail.tsx",
+  "./review-studio-shared.ts",
+]
+  .map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"))
+  .join("\n");
 const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 function cssRule(selector: string) {
@@ -57,6 +66,52 @@ test("stage detail drawer renders the clicked stage immediately without deferred
 test("stage detail drawer includes the live agent console for granular progress", () => {
   assert.match(source, /function LiveConsole/);
   assert.match(source, /<LiveConsole/);
+});
+
+test("stage detail drawer separates live logs and structured report into height-filling tabs", () => {
+  assert.match(source, /node-detail-tabs/);
+  assert.match(source, /node-detail-tab-panel/);
+  assert.match(source, />实时日志</);
+  assert.match(source, />诊断报告</);
+
+  const viewerRule = exactCssRule(".result-viewer");
+  assert.match(viewerRule, /overflow:\s*hidden/);
+
+  const panelRule = cssRule(".node-detail-tab-panel");
+  assert.match(panelRule, /flex:\s*1/);
+  assert.match(panelRule, /overflow-y:\s*auto/);
+});
+
+test("stage detail drawer header height adapts to viewport height instead of using a fixed bar", () => {
+  const headerRule = exactCssRule(".node-result-header");
+  assert.match(headerRule, /min-height:\s*clamp\([^)]*dvh[^)]*\)/);
+  assert.match(headerRule, /padding:\s*clamp\([^)]*dvh[^)]*\)/);
+  assert.doesNotMatch(headerRule, /min-height:\s*52px/);
+});
+
+test("agent reports use a clean summary-first layout instead of dense legacy report blocks", () => {
+  assert.match(source, /clean-report-shell/);
+  assert.match(source, /clean-report-hero/);
+  assert.match(source, /clean-insight-grid/);
+  assert.match(source, /clean-detail-section/);
+  assert.match(source, /clean-summary-lead/);
+  assert.match(source, /summary-header/);
+  assert.match(source, /summary-metrics-inline/);
+  assert.match(source, /summary-section/);
+  assert.match(source, /summary-agent-strip/);
+
+  const cleanShellRule = cssRule(".clean-report-shell");
+  assert.match(cleanShellRule, /gap:\s*clamp/);
+  assert.match(cleanShellRule, /background:\s*transparent/);
+});
+
+test("rewrite PDF export applies visual resume templates instead of one fixed PDF style", () => {
+  assert.match(source, /detectPdfTemplate/);
+  assert.match(source, /getPdfTemplateStyles/);
+  assert.match(source, /pdf-template-engineering/);
+  assert.match(source, /pdf-template-business/);
+  assert.match(source, /pdf-template-transition/);
+  assert.match(source, /pdf-template-early/);
 });
 
 test("live agent console never stores or renders raw model output text", () => {
