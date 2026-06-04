@@ -1,0 +1,169 @@
+import {
+  AlertCircle,
+  Bot,
+  BriefcaseBusiness,
+  CheckCircle2,
+  Cpu,
+  Edit,
+  FileText,
+  Sparkles,
+} from "lucide-react";
+
+import type {
+  ReviewRunResult,
+  ReviewStageProgressPhase,
+  RevisionSuggestion,
+} from "@/lib/review/schemas";
+import type { LocalReviewStageStatus } from "@/lib/review/local-run-cache";
+
+export type StageStatus = LocalReviewStageStatus;
+
+export const STAGE_ORDER = [
+  "resume_loader",
+  "resume_parser",
+  "hr_agent",
+  "interviewer_agent",
+  "career_master_agent",
+  "summary_agent",
+  "rewrite_agent",
+] as const;
+
+export type StageName = (typeof STAGE_ORDER)[number];
+
+export type StageLogEntry = {
+  timestamp: string;
+  phase: ReviewStageProgressPhase | null;
+  message: string;
+  type?: "info" | "success" | "error";
+};
+
+export type StageLiveState = {
+  phase: ReviewStageProgressPhase | null;
+  latestMessage: string;
+  details: string[];
+  logs?: StageLogEntry[];
+};
+
+export const STAGE_META: Record<
+  StageName,
+  { label: string; focus: string; icon: typeof FileText }
+> = {
+  resume_loader: {
+    label: "Loader",
+    focus: "读取并解析原始简历数据源",
+    icon: FileText,
+  },
+  resume_parser: {
+    label: "Parser",
+    focus: "深度结构化解析候选人画像",
+    icon: Bot,
+  },
+  hr_agent: {
+    label: "HR Agent",
+    focus: "招聘视角评估与 ATS 规则适配",
+    icon: BriefcaseBusiness,
+  },
+  interviewer_agent: {
+    label: "Interviewer Agent",
+    focus: "技术深度检验、可追问性与履历查验",
+    icon: Cpu,
+  },
+  career_master_agent: {
+    label: "Career Master Agent",
+    focus: "资深职业大师评估与高阶行业叙事",
+    icon: Sparkles,
+  },
+  summary_agent: {
+    label: "Summary",
+    focus: "意见整合并产出修改指导",
+    icon: CheckCircle2,
+  },
+  rewrite_agent: {
+    label: "Rewrite",
+    focus: "智能简历全方位深度改写",
+    icon: Edit,
+  },
+};
+
+export function createEmptyStageLiveState(): StageLiveState {
+  return {
+    phase: null,
+    latestMessage: "",
+    details: [],
+    logs: [],
+  };
+}
+
+export const EMPTY_STAGE_LIVE_STATE: StageLiveState = createEmptyStageLiveState();
+
+export function isStageName(value: string): value is StageName {
+  return STAGE_ORDER.includes(value as StageName);
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function formatStageLabel(value: string): string {
+  return isStageName(value) ? STAGE_META[value].label : value.replace(/_/g, " ");
+}
+
+export function formatReadyLevel(value: ReviewRunResult["finalReview"]["readyLevel"]): string {
+  switch (value) {
+    case "needs_rewrite":
+      return "亟需重写";
+    case "promising":
+      return "极具潜力";
+    case "strong":
+      return "背景强劲";
+    default:
+      return value;
+  }
+}
+
+export function formatPriority(value: RevisionSuggestion["priority"]): string {
+  switch (value) {
+    case "high":
+      return "最高优先级";
+    case "medium":
+      return "中优先级";
+    case "low":
+      return "低优先级";
+    default:
+      return value;
+  }
+}
+
+export function formatPhaseLabel(phase: ReviewStageProgressPhase | null): string {
+  switch (phase) {
+    case "requesting_model":
+      return "发起请求";
+    case "model_thinking":
+      return "Agent 深度思考中";
+    case "streaming_output":
+      return "模型流式响应";
+    case "validating_output":
+      return "解析并格式化结果";
+    default:
+      return "等待处理";
+  }
+}
+
+export function formatWorkflowStatus(status: StageStatus, phase: ReviewStageProgressPhase | null): string {
+  if (phase) {
+    return formatPhaseLabel(phase);
+  }
+  if (status === "done") {
+    return "诊断完成";
+  }
+  if (status === "running") {
+    return "执行诊断中";
+  }
+  if (status === "interrupted") {
+    return "已中断，可继续";
+  }
+  if (status === "failed") {
+    return "执行失败，可重试";
+  }
+  return "等待队列中";
+}
