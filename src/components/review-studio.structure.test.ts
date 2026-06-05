@@ -168,10 +168,12 @@ test("target job is configured through one dropdown trigger instead of inline in
 });
 
 test("branch and merge connectors extend into grid gaps to meet adjacent cards", () => {
-  assert.match(source, /const leftPath = "M -14 160/);
-  assert.match(source, /const midPath = "M -14 160 H 134"/);
-  assert.match(source, /H 134"/);
-  assert.doesNotMatch(source, /const midPath = "M 10 160 H 110"/);
+  // Connectors now dynamically compute fromX/toX from actual card bounding rects
+  assert.match(source, /getBoundingClientRect/);
+  assert.match(source, /\.right\s*-\s*rect\.left/);
+  assert.match(source, /\.left\s*-\s*rect\.left/);
+  // SVGs use overflow:visible to render beyond container bounds
+  assert.match(source, /overflow.*visible/);
 });
 
 test("target job popover layers above the workflow canvas", () => {

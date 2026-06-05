@@ -15,8 +15,8 @@ function cssRule(selector: string) {
 
 test("review studio exposes PC workspace navigation for workflow and PDF agent editing", () => {
   assert.match(studioSource, /activeWorkspace/);
-  assert.match(studioSource, />工作流诊断</);
-  assert.match(studioSource, />Agent 改简历</);
+  assert.match(studioSource, />Workflow</);
+  assert.match(studioSource, />Agent Chat</);
   assert.match(studioSource, /<PdfAgentWorkbench/);
   assert.match(styles, /\.workspace-nav/);
 });
@@ -41,24 +41,30 @@ test("top navigation keeps the brand compact instead of wrapping into a tall col
   assert.doesNotMatch(studioSource, /identity-badge identity-badge/);
 });
 
-test("workflow upload target and start controls live inside the canvas as a collapsible panel", () => {
-  assert.match(studioSource, /isWorkflowControlsCollapsed/);
+test("workflow upload target and start controls live inside the canvas as a compact setup node", () => {
+  assert.doesNotMatch(studioSource, /isWorkflowControlsCollapsed/);
   assert.match(studioSource, /workflow-canvas-controls/);
   assert.match(studioSource, /workflow-setup-panel/);
+  assert.match(studioSource, /STEP 01/);
+  assert.match(studioSource, />Input</);
+  assert.match(studioSource, /workflow-entry-column/);
+  assert.match(studioSource, /workflow-output-column/);
+  assert.match(studioSource, /WorkflowVerticalArrow/);
   assert.match(studioSource, /workflow-start-panel/);
   assert.match(studioSource, /workflow-setup-form/);
   assert.match(studioSource, /workflow-start-action/);
   assert.doesNotMatch(studioSource, /workflow-command-dock/);
-  assert.match(cssRule(".workflow-canvas-controls"), /position:\s*absolute/);
-  assert.match(cssRule(".workflow-canvas-controls"), /width:\s*min\(clamp\(300px,\s*24vw,\s*340px\),\s*calc\(100%\s*-\s*32px\)\)/);
-  assert.doesNotMatch(cssRule(".workflow-canvas-controls.is-collapsed"), /width:/);
-  assert.match(cssRule(".workflow-setup-form"), /grid-template-columns:\s*1fr/);
+  assert.match(cssRule(".workflow-canvas-controls"), /position:\s*relative/);
+  assert.match(cssRule(".workflow-canvas-controls"), /width:\s*100%/);
+  assert.match(cssRule(".workflow-flowchart"), /grid-template-columns:\s*minmax\(230px,\s*0\.92fr\)/);
+  assert.match(cssRule(".workflow-setup-container"), /grid-column:\s*1\s*\/\s*span\s*3/);
+  assert.match(cssRule(".workflow-setup-form"), /grid-template-columns:\s*1fr\s+1fr/);
   assert.doesNotMatch(cssRule(".workflow-setup-form"), /max-content/);
-  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /width:\s*100%/);
+  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /width:\s*min\(360px,\s*calc\(100vw\s*-\s*48px\)\)/);
   assert.match(cssRule(".workflow-setup-form .target-job-popover"), /right:\s*auto/);
-  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /z-index:\s*160/);
+  assert.match(cssRule(".workflow-setup-form .target-job-popover"), /z-index:\s*320/);
   assert.doesNotMatch(cssRule(".workflow-pane"), /contain:\s*layout\s+paint\s+style/);
-  assert.match(cssRule(".workflow-canvas-controls"), /z-index:\s*120/);
+  assert.match(cssRule(".workflow-canvas-controls"), /z-index:\s*6/);
 });
 
 test("PDF agent workbench uses native object URL PDF preview with refresh and download controls", () => {

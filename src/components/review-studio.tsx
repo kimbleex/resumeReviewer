@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   BriefcaseBusiness,
@@ -115,7 +115,7 @@ function isStageReadyToRun(stage: StageName, stagePayloads: Partial<Record<Stage
 
 function getStagesToReset(startStage: StageName): StageName[] {
   const parallelReviewers: StageName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
-  
+
   if (startStage === "resume_loader") {
     return [...STAGE_ORDER];
   } else if (startStage === "resume_parser") {
@@ -273,49 +273,158 @@ const WorkflowDownArrow = memo(function WorkflowDownArrow({
   isRunning: boolean;
   isReady: boolean;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [ports, setPorts] = useState({ fromX: -14, fromY: 278, toX: 100, toY: 160 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const parent = el.closest('.workflow-flowchart');
+      if (!parent) return;
+      const loaderCard = parent.querySelector('.workflow-node-resume_loader');
+      const parserCard = parent.querySelector('.workflow-node-resume_parser');
+      const rect = parent.getBoundingClientRect();
+      if (loaderCard && parserCard && rect.width > 0) {
+        const lRect = loaderCard.getBoundingClientRect();
+        const pRect = parserCard.getBoundingClientRect();
+        setPorts({
+          fromX: lRect.right - rect.left,
+          fromY: (lRect.top + lRect.height / 2) - rect.top,
+          toX: pRect.left - rect.left,
+          toY: (pRect.top + pRect.height / 2) - rect.top,
+        });
+      }
+    };
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const flowParent = el.closest('.workflow-flowchart');
+    if (flowParent) {
+      ro.observe(flowParent);
+      const loader = flowParent.querySelector('.workflow-node-resume_loader');
+      if (loader) ro.observe(loader);
+      const parser = flowParent.querySelector('.workflow-node-resume_parser');
+      if (parser) ro.observe(parser);
+    }
+    update();
+    return () => ro.disconnect();
+  }, []);
+
   const lineClass = isDone ? "flow-line-done" : isRunning ? "flow-line-active" : isReady ? "flow-line-ready" : "flow-line-idle";
-  const marker = isDone ? "url(#arrow-green)" : isRunning || isReady ? "url(#arrow-cyan)" : "url(#arrow-gray)";
-  const path = "M 10 24 H 62";
+
+  const fx = ports.fromX;
+  const fy = ports.fromY;
+  const tx = ports.toX;
+  const ty = ports.toY;
+  const cx = (fx + tx) / 2; // center X for vertical segment
+  const r = 12;
+  const path = Math.abs(fy - ty) < 4
+    ? `M ${fx} ${fy} H ${tx}`
+    : `M ${fx} ${fy} H ${cx - r} Q ${cx} ${fy} ${cx} ${fy > ty ? fy - r : fy + r} V ${fy > ty ? ty + r : ty - r} Q ${cx} ${ty} ${cx + r} ${ty} H ${tx}`;
+
+  const arrowColor =
+    isDone ? "var(--green)" : (isRunning || isReady) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
 
   return (
-    <div className="flowchart-arrow-container">
-      <svg width="76" height="48" viewBox="0 0 76 48" fill="none">
+    <div className="flowchart-arrow-container" ref={containerRef}>
+      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
+        <path d={path} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={path} className={lineClass} fill="none" />
+        <FlowRunnerPath path={path} lineClass={lineClass} duration="1.45s" />
+        <path
+          d={`M ${tx - 6} ${ty - 5} L ${tx} ${ty} L ${tx - 6} ${ty + 5}`}
+          stroke={arrowColor}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      </svg>
+    </div>
+  );
+});
+
+const WorkflowVerticalArrow = memo(function WorkflowVerticalArrow({
+  isDone,
+  isRunning,
+  isReady,
+}: {
+  isDone: boolean;
+  isRunning: boolean;
+  isReady: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [ports, setPorts] = useState({ cx: 24, fromY: -8, toY: 58 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const flowParent = el.closest('.workflow-flowchart');
+      const wrapper = el.parentElement;
+      const fromSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
+        ? '.workflow-node-summary_agent'
+        : '.workflow-input-node';
+      const toSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
+        ? '.workflow-node-rewrite_agent'
+        : '.workflow-node-resume_loader';
+      const prev = flowParent?.querySelector(fromSelector);
+      const next = flowParent?.querySelector(toSelector);
+      const rect = flowParent?.getBoundingClientRect();
+      if (prev && next && rect && rect.height > 0) {
+        const prevRect = prev.getBoundingClientRect();
+        const nextRect = next.getBoundingClientRect();
+        setPorts({
+          cx: (nextRect.left + nextRect.width / 2) - rect.left,
+          fromY: prevRect.bottom - rect.top,
+          toY: nextRect.top - rect.top,
+        });
+      }
+    };
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const flowParent = el.closest('.workflow-flowchart');
+    const wrapper = el.parentElement;
+    if (flowParent) {
+      ro.observe(flowParent);
+      const fromSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
+        ? '.workflow-node-summary_agent'
+        : '.workflow-input-node';
+      const toSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
+        ? '.workflow-node-rewrite_agent'
+        : '.workflow-node-resume_loader';
+      const prev = flowParent.querySelector(fromSelector);
+      const next = flowParent.querySelector(toSelector);
+      if (prev) ro.observe(prev);
+      if (next) ro.observe(next);
+    }
+    update();
+    return () => ro.disconnect();
+  }, []);
+
+  const lineClass = isDone ? "flow-line-done" : isRunning ? "flow-line-active" : isReady ? "flow-line-ready" : "flow-line-idle";
+  const arrowColor = isDone ? "var(--green)" : (isRunning || isReady) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
+  const { cx, fromY, toY } = ports;
+  const path = `M ${cx} ${fromY} V ${toY}`;
+
+  return (
+    <div className="flowchart-vertical-arrow-container" ref={containerRef}>
+      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
         <defs>
-          <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="glow-green" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <marker id="arrow-down-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M 2 2 L 6 5 L 2 8" stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </marker>
-          <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <marker id="arrow-down-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M 2 2 L 6 5 L 2 8" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </marker>
-          <marker id="arrow-gray" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <marker id="arrow-down-gray" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M 2 2 L 6 5 L 2 8" stroke="rgba(0, 242, 254, 0.38)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </marker>
         </defs>
-
-        {/* Faint static pipeline background path */}
-        <path d={path} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-
-        {/* Active glowing dynamic flow overlay */}
-        <path
-          d={path}
-          className={lineClass}
-          vectorEffect="non-scaling-stroke"
-          markerEnd={marker}
-        />
+        <path d={path} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" />
+        <path d={path} className={lineClass} markerEnd={isDone ? "url(#arrow-down-green)" : (isRunning || isReady) ? "url(#arrow-down-cyan)" : "url(#arrow-down-gray)"} />
         <FlowRunnerPath path={path} lineClass={lineClass} duration="1.45s" />
       </svg>
     </div>
@@ -335,16 +444,46 @@ const WorkflowBranchConnector = memo(function WorkflowBranchConnector({
   careerStatus: StageStatus;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ w: 90, h: 450 });
+  const [ports, setPorts] = useState({ fromX: -14, fromY: 160, toX: 100, topY: 42, midY: 160, bottomY: 278 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) setDims({ w: width, h: height });
-    });
+    const update = () => {
+      const parent = el.closest('.workflow-flowchart');
+      if (!parent) return;
+      const parserCard = parent.querySelector('.workflow-node-resume_parser');
+      const hrCard = parent.querySelector('.workflow-node-hr_agent');
+      const interviewerCard = parent.querySelector('.workflow-node-interviewer_agent');
+      const careerCard = parent.querySelector('.workflow-node-career_master_agent');
+      const rect = parent.getBoundingClientRect();
+      if (parserCard && hrCard && interviewerCard && careerCard && rect.width > 0) {
+        const pRect = parserCard.getBoundingClientRect();
+        const hRect = hrCard.getBoundingClientRect();
+        const iRect = interviewerCard.getBoundingClientRect();
+        const cRect = careerCard.getBoundingClientRect();
+        setPorts({
+          fromX: pRect.right - rect.left,
+          fromY: (pRect.top + pRect.height / 2) - rect.top,
+          toX: Math.min(hRect.left, iRect.left, cRect.left) - rect.left,
+          topY: (hRect.top + hRect.height / 2) - rect.top,
+          midY: (iRect.top + iRect.height / 2) - rect.top,
+          bottomY: (cRect.top + cRect.height / 2) - rect.top,
+        });
+      }
+    };
+
+    const ro = new ResizeObserver(update);
     ro.observe(el);
+    const flowParent = el.closest('.workflow-flowchart');
+    if (flowParent) {
+      ro.observe(flowParent);
+      for (const sel of ['.workflow-node-resume_parser', '.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent']) {
+        const n = flowParent.querySelector(sel);
+        if (n) ro.observe(n);
+      }
+    }
+    update();
     return () => ro.disconnect();
   }, []);
 
@@ -356,72 +495,67 @@ const WorkflowBranchConnector = memo(function WorkflowBranchConnector({
   const midClass = getBranchClass(interviewerStatus);
   const rightClass = getBranchClass(careerStatus);
 
-  const leftPath = "M -14 160 H 48 Q 60 160 60 148 V 54 Q 60 42 72 42 H 134";
-  const midPath = "M -14 160 H 134";
-  const rightPath = "M -14 160 H 48 Q 60 160 60 172 V 266 Q 60 278 72 278 H 134";
+  const allReviewersDone = hrStatus === "done" && interviewerStatus === "done" && careerStatus === "done";
+  const anyReviewerRunning = hrStatus === "running" || interviewerStatus === "running" || careerStatus === "running";
+  const trunkClass = allReviewersDone
+    ? "flow-line-done"
+    : anyReviewerRunning
+      ? "flow-line-active"
+      : isParserDone
+        ? "flow-line-ready"
+        : "flow-line-idle";
+
+  const fx = ports.fromX;
+  const fy = ports.fromY;
+  const tx = ports.toX;
+  const ty1 = ports.topY;
+  const ty2 = ports.midY;
+  const ty3 = ports.bottomY;
+  const cx = (fx + tx) / 2;
+  const r = 12;
+
+  const buildBranchPath = (ty: number) => {
+    if (Math.abs(ty - fy) < 8) {
+      return `M ${cx - r} ${fy} H ${tx}`;
+    }
+    const sign = ty < fy ? -1 : 1;
+    const startCornerY = fy + sign * r;
+    const endCornerY = ty - sign * r;
+    return `M ${cx - r} ${fy} Q ${cx} ${fy} ${cx} ${startCornerY} V ${endCornerY} Q ${cx} ${ty} ${cx + r} ${ty} H ${tx}`;
+  };
+
+  const pathTrunk = `M ${fx} ${fy} H ${cx - r}`;
+  const pathTop = buildBranchPath(ty1);
+  const pathMid = buildBranchPath(ty2);
+  const pathBottom = buildBranchPath(ty3);
 
   const arrowColor = (status: StageStatus, ready: boolean) =>
     status === "done" ? "var(--green)" : (status === "running" || ready) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
 
-  // Inverse scale factors: cancel the non-uniform SVG transform so chevron renders undistorted.
-  // The SVG maps viewBox(120×320) → pixels(dims.w × dims.h).
-  // Applying scale(120/w, 320/h) inside the group undoes that, making 1 unit = 1px.
-  const isx = 120 / dims.w;
-  const isy = 320 / dims.h;
-  // Chevron shape in PIXELS (same visual size as WorkflowDownArrow marker)
-  const dx = 5; // px wide
-  const dy = 5; // px tall half-height
-  // Arrowhead group: translate to endpoint, undo scale, draw chevron
-  const arrowGroup = (cx: number, cy: number, color: string) => (
-    <g transform={`translate(${cx},${cy}) scale(${isx},${isy})`}>
-      <path
-        d={`M ${-dx} ${-dy} L ${dx * 0.3} 0 L ${-dx} ${dy}`}
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </g>
+  const chevron = (y: number, color: string) => (
+    <path d={`M ${tx - 6} ${y - 5} L ${tx} ${y} L ${tx - 6} ${y + 5}`} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
   );
 
   return (
-    <div className="flowchart-branch-container" style={{ position: "relative" }} ref={containerRef}>
-      <svg width="100%" height="100%" viewBox="0 0 120 320" preserveAspectRatio="none" fill="none">
-        <defs>
-          <filter id="glow-cyan-b" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="glow-green-b" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
+    <div className="flowchart-branch-container" ref={containerRef}>
+      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
+        <path d={pathTrunk} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathTop} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathMid} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathBottom} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
 
-        {/* Faint static pipeline background paths */}
-        <path d={leftPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={midPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={rightPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
+        <path d={pathTrunk} className={trunkClass} fill="none" />
+        <path d={pathTop} className={leftClass} fill="none" />
+        <path d={pathMid} className={midClass} fill="none" />
+        <path d={pathBottom} className={rightClass} fill="none" />
+        <FlowRunnerPath path={pathTrunk} lineClass={trunkClass} duration="1.75s" />
+        <FlowRunnerPath path={pathTop} lineClass={leftClass} duration="2.15s" delay="-0.35s" />
+        <FlowRunnerPath path={pathMid} lineClass={midClass} duration="1.65s" delay="-0.1s" />
+        <FlowRunnerPath path={pathBottom} lineClass={rightClass} duration="2.15s" delay="-0.75s" />
 
-        {/* Active glowing dynamic flow overlays */}
-        <path d={leftPath} className={leftClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={midPath} className={midClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={rightPath} className={rightClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <FlowRunnerPath path={leftPath} lineClass={leftClass} duration="2.15s" delay="-0.35s" />
-        <FlowRunnerPath path={midPath} lineClass={midClass} duration="1.65s" delay="-0.1s" />
-        <FlowRunnerPath path={rightPath} lineClass={rightClass} duration="2.15s" delay="-0.75s" />
-
-        {/* Undistorted arrowheads via inverse-scale transform */}
-        {arrowGroup(134, 42, arrowColor(hrStatus, isParserDone))}
-        {arrowGroup(134, 160, arrowColor(interviewerStatus, isParserDone))}
-        {arrowGroup(134, 278, arrowColor(careerStatus, isParserDone))}
+        {chevron(ty1, arrowColor(hrStatus, isParserDone))}
+        {chevron(ty2, arrowColor(interviewerStatus, isParserDone))}
+        {chevron(ty3, arrowColor(careerStatus, isParserDone))}
       </svg>
     </div>
   );
@@ -439,16 +573,46 @@ const WorkflowMergeConnector = memo(function WorkflowMergeConnector({
   summaryStatus: StageStatus;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ w: 90, h: 450 });
+  const [ports, setPorts] = useState({ fromX: -14, topY: 42, midY: 160, bottomY: 278, toX: 100, toY: 42 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) setDims({ w: width, h: height });
-    });
+    const update = () => {
+      const parent = el.closest('.workflow-flowchart');
+      if (!parent) return;
+      const hrCard = parent.querySelector('.workflow-node-hr_agent');
+      const interviewerCard = parent.querySelector('.workflow-node-interviewer_agent');
+      const careerCard = parent.querySelector('.workflow-node-career_master_agent');
+      const summaryCard = parent.querySelector('.workflow-node-summary_agent');
+      const rect = parent.getBoundingClientRect();
+      if (hrCard && interviewerCard && careerCard && summaryCard && rect.width > 0) {
+        const hRect = hrCard.getBoundingClientRect();
+        const iRect = interviewerCard.getBoundingClientRect();
+        const cRect = careerCard.getBoundingClientRect();
+        const sRect = summaryCard.getBoundingClientRect();
+        setPorts({
+          fromX: Math.max(hRect.right, iRect.right, cRect.right) - rect.left,
+          topY: (hRect.top + hRect.height / 2) - rect.top,
+          midY: (iRect.top + iRect.height / 2) - rect.top,
+          bottomY: (cRect.top + cRect.height / 2) - rect.top,
+          toX: sRect.left - rect.left,
+          toY: (sRect.top + sRect.height / 2) - rect.top,
+        });
+      }
+    };
+
+    const ro = new ResizeObserver(update);
     ro.observe(el);
+    const flowParent = el.closest('.workflow-flowchart');
+    if (flowParent) {
+      ro.observe(flowParent);
+      for (const sel of ['.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent', '.workflow-node-summary_agent']) {
+        const n = flowParent.querySelector(sel);
+        if (n) ro.observe(n);
+      }
+    }
+    update();
     return () => ro.disconnect();
   }, []);
 
@@ -468,62 +632,66 @@ const WorkflowMergeConnector = memo(function WorkflowMergeConnector({
   const midClass = getMergeClass(interviewerStatus);
   const rightClass = getMergeClass(careerStatus);
 
-  const leftPath = "M -14 42 H 48 Q 60 42 60 54 V 148 Q 60 160 72 160 H 134";
-  const midPath = "M -14 160 H 134";
-  const rightPath = "M -14 278 H 48 Q 60 278 60 266 V 172 Q 60 160 72 160 H 134";
+  const trunkClass = summaryStatus === "done"
+    ? "flow-line-done"
+    : summaryStatus === "running"
+      ? "flow-line-active"
+      : allReviewersDone
+        ? "flow-line-ready"
+        : "flow-line-idle";
+
+  const fx = ports.fromX;
+  const tx = ports.toX;
+  const ty1 = ports.topY;
+  const ty2 = ports.midY;
+  const ty3 = ports.bottomY;
+  const toY = ports.toY;
+  const cx = (fx + tx) / 2;
+  const r = 12;
+
+  const buildBranchPath = (ty: number) => {
+    if (Math.abs(ty - toY) < 8) {
+      return `M ${fx} ${ty} H ${cx + r}`;
+    }
+    const sign = ty > toY ? -1 : 1;
+    const startCornerY = ty + sign * r;
+    const endCornerY = toY - sign * r;
+    return `M ${fx} ${ty} H ${cx - r} Q ${cx} ${ty} ${cx} ${startCornerY} V ${endCornerY} Q ${cx} ${toY} ${cx + r} ${toY}`;
+  };
+
+  const pathTop = buildBranchPath(ty1);
+  const pathMid = buildBranchPath(ty2);
+  const pathBottom = buildBranchPath(ty3);
+  const pathTrunk = `M ${cx + r} ${toY} H ${tx}`;
 
   const arrowColor =
     summaryStatus === "done" ? "var(--green)" : (summaryStatus === "running" || allReviewersDone) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
 
-  const isx = 120 / dims.w;
-  const isy = 320 / dims.h;
-  const dx = 5;
-  const dy = 5;
-
   return (
-    <div className="flowchart-merge-container" style={{ position: "relative" }} ref={containerRef}>
-      <svg width="100%" height="100%" viewBox="0 0 120 320" preserveAspectRatio="none" fill="none">
-        <defs>
-          <filter id="glow-cyan-m" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="glow-green-m" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
+    <div className="flowchart-merge-container" ref={containerRef}>
+      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
+        <path d={pathTop} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathMid} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathBottom} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
+        <path d={pathTrunk} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
 
-        {/* Faint static pipeline background paths */}
-        <path d={leftPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={midPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={rightPath} stroke="rgba(255, 255, 255, 0.05)" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
+        <path d={pathTop} className={leftClass} fill="none" />
+        <path d={pathMid} className={midClass} fill="none" />
+        <path d={pathBottom} className={rightClass} fill="none" />
+        <path d={pathTrunk} className={trunkClass} fill="none" />
+        <FlowRunnerPath path={pathTop} lineClass={leftClass} duration="2.15s" delay="-0.2s" />
+        <FlowRunnerPath path={pathMid} lineClass={midClass} duration="1.65s" delay="-0.55s" />
+        <FlowRunnerPath path={pathBottom} lineClass={rightClass} duration="2.15s" delay="-0.9s" />
+        <FlowRunnerPath path={pathTrunk} lineClass={trunkClass} duration="1.75s" />
 
-        {/* Active glowing dynamic flow overlays */}
-        <path d={leftPath} className={leftClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={midPath} className={midClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <path d={rightPath} className={rightClass} fill="none" vectorEffect="non-scaling-stroke" />
-        <FlowRunnerPath path={leftPath} lineClass={leftClass} duration="2.15s" delay="-0.2s" />
-        <FlowRunnerPath path={midPath} lineClass={midClass} duration="1.65s" delay="-0.55s" />
-        <FlowRunnerPath path={rightPath} lineClass={rightClass} duration="2.15s" delay="-0.9s" />
-
-        {/* Undistorted arrowhead via inverse-scale transform */}
-        <g transform={`translate(134,160) scale(${isx},${isy})`}>
-          <path
-            d={`M ${-dx} ${-dy} L ${dx * 0.3} 0 L ${-dx} ${dy}`}
-            stroke={arrowColor}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </g>
+        <path
+          d={`M ${tx - 6} ${toY - 5} L ${tx} ${toY} L ${tx - 6} ${toY + 5}`}
+          stroke={arrowColor}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
       </svg>
     </div>
   );
@@ -559,7 +727,7 @@ const StageWorkflowCard = memo(function StageWorkflowCard({
 
   return (
     <div
-      className={`workflow-node-card workflow-node-${status} ${isSelected ? "is-selected" : ""} ${hasResult ? "has-result" : ""}`}
+      className={`workflow-node-card workflow-node-${stage} workflow-node-${status} ${isSelected ? "is-selected" : ""} ${hasResult ? "has-result" : ""}`}
       onClick={() => onOpenStageDetails(stage)}
       role="button"
       tabIndex={0}
@@ -710,6 +878,8 @@ function FutureAgentSkeleton() {
 }
 
 type WorkflowTimelineProps = {
+  setupNode: ReactNode;
+  isInputReady: boolean;
   selectedStage: StageName;
   stagePayloads: Partial<Record<StageName, unknown>>;
   stageStatus: Record<StageName, StageStatus>;
@@ -721,6 +891,8 @@ type WorkflowTimelineProps = {
 };
 
 const WorkflowTimeline = memo(function WorkflowTimeline({
+  setupNode,
+  isInputReady,
   selectedStage,
   stagePayloads,
   stageStatus,
@@ -737,11 +909,25 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
 
   return (
     <div className="workflow-flowchart" aria-label="Resume review workflow flowchart">
-      {/* 1. Resume Loader */}
-      <div className="flowchart-step-row full-width-row">
+      {/* 1. Setup Node (Input Card) - Spans col 1-3 */}
+      <div className="workflow-setup-container workflow-entry-column">
+        {setupNode}
+      </div>
+
+      {/* Vertical arrow from Input to Loader */}
+      <div className="workflow-vertical-arrow-left">
+        <WorkflowVerticalArrow
+          isDone={getStatus("resume_loader") === "done"}
+          isRunning={getStatus("resume_loader") === "running"}
+          isReady={isInputReady}
+        />
+      </div>
+
+      {/* 2. Resume Loader (bottom row, col 1) */}
+      <div className="workflow-loader-container">
         <StageWorkflowCard
           stage="resume_loader"
-          index={0}
+          index={1}
           isSelected={selectedStage === "resume_loader"}
           hasResult={hasResult("resume_loader")}
           status={getStatus("resume_loader")}
@@ -754,18 +940,20 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
         />
       </div>
 
-      {/* Down arrow loader -> parser */}
-      <WorkflowDownArrow
-        isDone={getStatus("resume_parser") === "done"}
-        isRunning={getStatus("resume_parser") === "running"}
-        isReady={getStatus("resume_loader") === "done"}
-      />
+      {/* Horizontal connector Loader -> Parser */}
+      <div className="workflow-down-arrow-container">
+        <WorkflowDownArrow
+          isDone={getStatus("resume_parser") === "done"}
+          isRunning={getStatus("resume_parser") === "running"}
+          isReady={getStatus("resume_loader") === "done"}
+        />
+      </div>
 
-      {/* 2. Resume Parser */}
-      <div className="flowchart-step-row full-width-row">
+      {/* 3. Resume Parser (bottom row, col 3) */}
+      <div className="workflow-parser-container">
         <StageWorkflowCard
           stage="resume_parser"
-          index={1}
+          index={2}
           isSelected={selectedStage === "resume_parser"}
           hasResult={hasResult("resume_parser")}
           status={getStatus("resume_parser")}
@@ -779,18 +967,20 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
       </div>
 
       {/* Branch Parser -> Parallel Reviewer Agent */}
-      <WorkflowBranchConnector
-        isParserDone={getStatus("resume_parser") === "done"}
-        hrStatus={getStatus("hr_agent")}
-        interviewerStatus={getStatus("interviewer_agent")}
-        careerStatus={getStatus("career_master_agent")}
-      />
+      <div className="workflow-branch-container">
+        <WorkflowBranchConnector
+          isParserDone={getStatus("resume_parser") === "done"}
+          hrStatus={getStatus("hr_agent")}
+          interviewerStatus={getStatus("interviewer_agent")}
+          careerStatus={getStatus("career_master_agent")}
+        />
+      </div>
 
-      {/* 3. Three Parallel Evaluator Agents */}
+      {/* 4. Three Parallel Reviewers */}
       <div className="workflow-reviewer-row">
         <StageWorkflowCard
           stage="hr_agent"
-          index={2}
+          index={3}
           isSelected={selectedStage === "hr_agent"}
           hasResult={hasResult("hr_agent")}
           status={getStatus("hr_agent")}
@@ -803,7 +993,7 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
         />
         <StageWorkflowCard
           stage="interviewer_agent"
-          index={3}
+          index={4}
           isSelected={selectedStage === "interviewer_agent"}
           hasResult={hasResult("interviewer_agent")}
           status={getStatus("interviewer_agent")}
@@ -816,7 +1006,7 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
         />
         <StageWorkflowCard
           stage="career_master_agent"
-          index={4}
+          index={5}
           isSelected={selectedStage === "career_master_agent"}
           hasResult={hasResult("career_master_agent")}
           status={getStatus("career_master_agent")}
@@ -830,18 +1020,20 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
       </div>
 
       {/* Merge Reviewer Agents -> Summary Agent */}
-      <WorkflowMergeConnector
-        hrStatus={getStatus("hr_agent")}
-        interviewerStatus={getStatus("interviewer_agent")}
-        careerStatus={getStatus("career_master_agent")}
-        summaryStatus={getStatus("summary_agent")}
-      />
+      <div className="workflow-merge-container">
+        <WorkflowMergeConnector
+          hrStatus={getStatus("hr_agent")}
+          interviewerStatus={getStatus("interviewer_agent")}
+          careerStatus={getStatus("career_master_agent")}
+          summaryStatus={getStatus("summary_agent")}
+        />
+      </div>
 
-      {/* 4. Summary Agent */}
-      <div className="flowchart-step-row full-width-row">
+      {/* 5. Summary Agent */}
+      <div className="workflow-summary-container">
         <StageWorkflowCard
           stage="summary_agent"
-          index={5}
+          index={6}
           isSelected={selectedStage === "summary_agent"}
           hasResult={hasResult("summary_agent")}
           status={getStatus("summary_agent")}
@@ -854,16 +1046,20 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
         />
       </div>
 
-      <WorkflowDownArrow
-        isDone={getStatus("rewrite_agent") === "done"}
-        isRunning={getStatus("rewrite_agent") === "running"}
-        isReady={getStatus("summary_agent") === "done"}
-      />
+      {/* Vertical arrow from Summary to Rewrite */}
+      <div className="workflow-vertical-arrow-right">
+        <WorkflowVerticalArrow
+          isDone={getStatus("rewrite_agent") === "done"}
+          isRunning={getStatus("rewrite_agent") === "running"}
+          isReady={getStatus("summary_agent") === "done"}
+        />
+      </div>
 
-      <div className="flowchart-step-row full-width-row">
+      {/* 6. Resume Rewrite */}
+      <div className="workflow-rewrite-container workflow-output-column">
         <StageWorkflowCard
           stage="rewrite_agent"
-          index={6}
+          index={7}
           isSelected={selectedStage === "rewrite_agent"}
           hasResult={hasResult("rewrite_agent")}
           status={getStatus("rewrite_agent")}
@@ -880,6 +1076,9 @@ const WorkflowTimeline = memo(function WorkflowTimeline({
 }, areWorkflowTimelinePropsEqual);
 
 function areWorkflowTimelinePropsEqual(previous: WorkflowTimelineProps, next: WorkflowTimelineProps) {
+  if (previous.setupNode !== next.setupNode || previous.isInputReady !== next.isInputReady) {
+    return false;
+  }
   if (previous.selectedStage !== next.selectedStage) {
     return false;
   }
@@ -935,7 +1134,6 @@ export function ReviewStudio({
   const [selectedStage, setSelectedStage] = useState<StageName>("resume_loader");
   const [detailsStage, setDetailsStage] = useState<StageName | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<"workflow" | "agent">("workflow");
-  const [isWorkflowControlsCollapsed, setIsWorkflowControlsCollapsed] = useState(false);
   const [isIdentityMenuOpen, setIsIdentityMenuOpen] = useState(false);
   const floatingMenuRef = useRef<HTMLDivElement>(null);
 
@@ -984,7 +1182,8 @@ export function ReviewStudio({
     : cachedResumeFileName
       ? `${cachedResumeFileName} (本地断点)`
       : "选择简历源文件";
-  const primaryActionLabel = isRunning ? "专家团诊断中..." : canResumeLocalRun ? "继续诊断" : "启动简历诊断";
+  const primaryActionLabel = isRunning ? "评审进行中..." : canResumeLocalRun ? "继续评审" : "启动评审";
+  const isInputReady = Boolean((resumeFile || cachedResumeFileName || canResumeLocalRun) && targetRole);
 
   useEffect(() => {
     runningStagesRef.current = runningStages;
@@ -1583,6 +1782,117 @@ export function ReviewStudio({
     });
   }
 
+  const workflowSetupNode = (
+    <div className="workflow-canvas-controls flowchart-step-row full-width-row">
+      <div
+        className={`workflow-setup-panel workflow-node-card workflow-input-node ${
+          isInputReady ? "workflow-node-done" : "is-selected"
+        }`}
+      >
+        <div className="workflow-setup-header">
+          <span className="workflow-node-content">
+            <span className="workflow-node-kicker">STEP 01</span>
+            <strong>Input</strong>
+            <span className="workflow-node-status-text">
+              {isInputReady ? "简历与目标岗位已就绪" : "上传简历并配置目标岗位"}
+            </span>
+          </span>
+
+          <form className="workflow-start-panel" onSubmit={handleSubmit}>
+            <button
+              className="workflow-start-action"
+              type="submit"
+              disabled={isRunning || !canRunReview}
+              aria-label={primaryActionLabel}
+              title={primaryActionLabel}
+            >
+              {isRunning ? <LoaderCircle className="spin-icon" size={16} /> : <Play size={14} />}
+              <span>{primaryActionLabel}</span>
+            </button>
+          </form>
+        </div>
+
+        <div className="workflow-setup-form">
+          <label className="compact-upload" title={uploadLabel}>
+            <input
+              type="file"
+              accept=".txt,.md,.pdf,.docx"
+              onChange={(event) => {
+                const nextFile = event.currentTarget.files?.[0] ?? null;
+                setResumeFile(nextFile);
+                if (nextFile) {
+                  setCachedResumeFileName(nextFile.name);
+                  setCurrentRunId(null);
+                  setErrorMessage("");
+                }
+              }}
+            />
+            <Upload size={17} />
+            <span>{uploadLabel}</span>
+            {Boolean(resumeFile || cachedResumeFileName) && (
+              <span className="target-job-icon-badge" title="已上传">
+                <CheckCircle2 size={10} />
+              </span>
+            )}
+          </label>
+
+          <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
+            <button
+              className={`target-job-trigger ${targetRole ? "is-configured" : ""}`}
+              type="button"
+              onClick={handleToggleTargetJob}
+              disabled={isRunning}
+              aria-expanded={isTargetJobOpen}
+              aria-haspopup="dialog"
+              title={targetRole ? "目标岗位: 已配置" : "目标岗位: 未配置"}
+            >
+              <BriefcaseBusiness size={16} />
+              <span className="target-job-label">{targetRole || "目标岗位"}</span>
+              {targetRole ? (
+                <span className="target-job-icon-badge" title="已配置">
+                  <CheckCircle2 size={10} />
+                </span>
+              ) : null}
+            </button>
+
+            {isTargetJobOpen ? (
+              <div className="target-job-popover" role="dialog" aria-label="目标岗位配置">
+                <label className="target-job-popover-field">
+                  <span>岗位名称</span>
+                  <input
+                    type="text"
+                    value={targetRoleDraft}
+                    onChange={(event) => setTargetRoleDraft(event.currentTarget.value)}
+                    placeholder="例如：AI Agent 平台工程师"
+                    disabled={isRunning}
+                  />
+                </label>
+                <label className="target-job-popover-field">
+                  <span>岗位描述（选填）</span>
+                  <textarea
+                    value={targetDescriptionDraft}
+                    onChange={(event) => setTargetDescriptionDraft(event.currentTarget.value)}
+                    placeholder="可以从招聘平台复制 JD，留空则由 Agent 根据岗位名称自行判断。"
+                    disabled={isRunning}
+                    rows={4}
+                  />
+                </label>
+                <div className="target-job-popover-actions">
+                  <button type="button" className="secondary-action" onClick={() => setIsTargetJobOpen(false)}>
+                    取消
+                  </button>
+                  <button type="button" className="target-job-save" onClick={handleSaveTargetJob}>
+                    保存配置
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <main className="app-shell review-console-shell animate-fade-in">
       <header className="compact-topbar">
@@ -1598,7 +1908,7 @@ export function ReviewStudio({
             onClick={() => setActiveWorkspace("workflow")}
           >
             <GitBranch size={15} />
-            <span>工作流诊断</span>
+            <span>Workflow</span>
           </button>
           <button
             className={`workspace-nav-button ${activeWorkspace === "agent" ? "is-active" : ""}`}
@@ -1606,7 +1916,7 @@ export function ReviewStudio({
             onClick={() => setActiveWorkspace("agent")}
           >
             <FilePenLine size={15} />
-            <span>Agent 改简历</span>
+            <span>Agent Chat</span>
           </button>
         </nav>
 
@@ -1676,115 +1986,9 @@ export function ReviewStudio({
       {activeWorkspace === "workflow" ? (
         <section className="review-workspace">
           <aside className="workflow-pane">
-            <div className={`workflow-canvas-controls ${isWorkflowControlsCollapsed ? "is-collapsed" : ""}`}>
-              <div className="workflow-setup-panel">
-                <button
-                  className="workflow-canvas-controls-toggle"
-                  type="button"
-                  onClick={() => setIsWorkflowControlsCollapsed((value) => !value)}
-                  aria-expanded={!isWorkflowControlsCollapsed}
-                >
-                  <BriefcaseBusiness size={15} />
-                  <span>
-                    配置参数
-                    <em>{targetRole ? ` · ${targetRole}` : " · 待配置"}</em>
-                  </span>
-                  <ChevronDown size={15} />
-                </button>
-
-                {!isWorkflowControlsCollapsed ? (
-                  <div className="workflow-setup-form">
-                    <label className="compact-upload">
-                      <input
-                        type="file"
-                        accept=".txt,.md,.pdf,.docx"
-                        onChange={(event) => {
-                          const nextFile = event.currentTarget.files?.[0] ?? null;
-                          setResumeFile(nextFile);
-                          if (nextFile) {
-                            setCachedResumeFileName(nextFile.name);
-                            setCurrentRunId(null);
-                            setErrorMessage("");
-                          }
-                        }}
-                      />
-                      <Upload size={17} />
-                      <span>{uploadLabel}</span>
-                    </label>
-
-                    <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
-                    <button
-                      className={`target-job-trigger ${targetRole ? "is-configured" : ""}`}
-                      type="button"
-                      onClick={handleToggleTargetJob}
-                      disabled={isRunning}
-                      aria-expanded={isTargetJobOpen}
-                      aria-haspopup="dialog"
-                    >
-                      <BriefcaseBusiness size={16} />
-                      <span className="target-job-trigger-copy">
-                        <strong>目标岗位</strong>
-                        <span>{targetRole || "点击配置岗位名称/描述"}</span>
-                      </span>
-                      <span className={`target-job-state ${targetRole ? "is-configured" : "is-empty"}`}>
-                        {targetRole ? (
-                          <>
-                            <CheckCircle2 size={13} />
-                            已配置
-                          </>
-                        ) : (
-                          "未配置"
-                        )}
-                      </span>
-                      <ChevronDown size={15} />
-                    </button>
-
-                    {isTargetJobOpen ? (
-                      <div className="target-job-popover" role="dialog" aria-label="目标岗位配置">
-                        <label className="target-job-popover-field">
-                          <span>岗位名称</span>
-                          <input
-                            type="text"
-                            value={targetRoleDraft}
-                            onChange={(event) => setTargetRoleDraft(event.currentTarget.value)}
-                            placeholder="例如：AI Agent 平台工程师"
-                            disabled={isRunning}
-                          />
-                        </label>
-                        <label className="target-job-popover-field">
-                          <span>岗位描述（选填）</span>
-                          <textarea
-                            value={targetDescriptionDraft}
-                            onChange={(event) => setTargetDescriptionDraft(event.currentTarget.value)}
-                            placeholder="可以从招聘平台复制 JD，留空则由 Agent 根据岗位名称自行判断。"
-                            disabled={isRunning}
-                            rows={4}
-                          />
-                        </label>
-                        <div className="target-job-popover-actions">
-                          <button type="button" className="secondary-action" onClick={() => setIsTargetJobOpen(false)}>
-                            取消
-                          </button>
-                          <button type="button" className="target-job-save" onClick={handleSaveTargetJob}>
-                            保存配置
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <form className="workflow-start-panel" onSubmit={handleSubmit}>
-                <button className="workflow-start-action" type="submit" disabled={isRunning || !canRunReview}>
-                  {isRunning ? <LoaderCircle className="spin-icon" size={17} /> : <Play size={17} />}
-                  <span>{primaryActionLabel}</span>
-                </button>
-              </form>
-            </div>
-
             <WorkflowTimeline
+              setupNode={workflowSetupNode}
+              isInputReady={isInputReady}
               selectedStage={selectedStage}
               stagePayloads={stagePayloads}
               stageStatus={stageStatus}
