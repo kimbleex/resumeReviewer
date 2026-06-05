@@ -1,0 +1,502 @@
+.compact-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 320px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px dashed rgba(0, 242, 254, 0.25);
+  background: rgba(0, 242, 254, 0.03);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.compact-upload:hover {
+  border-color: var(--cyan);
+  background: rgba(0, 242, 254, 0.07);
+  box-shadow: 0 0 15px rgba(0, 242, 254, 0.1);
+}
+
+.compact-upload input {
+  display: none;
+}
+
+.compact-upload span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  color: var(--text-dim);
+}
+
+.compact-upload:hover span {
+  color: var(--text);
+}
+
+.target-job-config {
+  position: relative;
+  min-width: min(100%, 290px);
+}
+
+.target-job-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 0% 50%, rgba(0, 242, 254, 0.08), transparent 42%),
+    rgba(255, 255, 255, 0.018);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.target-job-trigger:hover:not(:disabled),
+.target-job-config.is-open .target-job-trigger {
+  border-color: rgba(0, 242, 254, 0.36);
+  background:
+    radial-gradient(circle at 0% 50%, rgba(0, 242, 254, 0.14), transparent 46%),
+    rgba(0, 242, 254, 0.035);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.1);
+}
+
+.target-job-trigger:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.target-job-trigger > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  opacity: 0.84;
+}
+
+.target-job-trigger > svg:last-child {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+
+.target-job-config.is-open .target-job-trigger > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.target-job-trigger-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.1;
+}
+
+.target-job-trigger-copy strong {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.target-job-trigger-copy span {
+  max-width: 100%;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-job-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.target-job-state.is-configured {
+  border-color: rgba(16, 185, 129, 0.26);
+  background: rgba(16, 185, 129, 0.05);
+  color: var(--green);
+}
+
+.target-job-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid rgba(0, 242, 254, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    var(--bg-elevated);
+  border-radius: 12px;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.55), 0 0 28px rgba(0, 242, 254, 0.08);
+  animation: targetJobPopoverIn 0.18s ease-out;
+}
+
+.target-job-popover::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: 28px;
+  width: 10px;
+  height: 10px;
+  border-left: 1px solid rgba(0, 242, 254, 0.18);
+  border-top: 1px solid rgba(0, 242, 254, 0.18);
+  background: var(--bg-elevated);
+  transform: rotate(45deg);
+}
+
+.target-job-popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.target-job-popover-field span {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.target-job-popover-field input,
+.target-job-popover-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.018);
+  color: var(--text);
+  border-radius: 8px;
+  outline: none;
+  font-size: 0.82rem;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.target-job-popover-field input {
+  height: 38px;
+  padding: 0 12px;
+}
+
+.target-job-popover-field textarea {
+  min-height: 112px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.target-job-popover-field input:focus,
+.target-job-popover-field textarea:focus {
+  border-color: rgba(0, 242, 254, 0.42);
+  background: rgba(0, 242, 254, 0.035);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.09);
+}
+
+.target-job-popover-field input::placeholder,
+.target-job-popover-field textarea::placeholder {
+  color: rgba(156, 163, 175, 0.68);
+}
+
+.target-job-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.secondary-action,
+.target-job-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.secondary-action {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.interrupt-action {
+  height: 38px;
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.interrupt-action:hover {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.11);
+}
+
+.target-job-save {
+  border: 1px solid rgba(0, 242, 254, 0.32);
+  color: var(--text);
+  background: rgba(0, 242, 254, 0.09);
+}
+
+.secondary-action:hover,
+.target-job-save:hover {
+  transform: translateY(-1px);
+}
+
+.target-job-save:hover {
+  border-color: var(--cyan);
+  background: rgba(0, 242, 254, 0.15);
+}
+
+.primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(0, 242, 254, 0.35);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.12), rgba(139, 92, 246, 0.12));
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.84rem;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.primary-action:hover:not(:disabled) {
+  border-color: var(--cyan);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.25), rgba(139, 92, 246, 0.25));
+  box-shadow: 0 0 18px rgba(0, 242, 254, 0.2);
+  transform: translateY(-1px);
+}
+
+.primary-action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.primary-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+.top-error-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 9px 14px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--red-dim);
+  font-size: 0.84rem;
+  border-radius: 8px;
+}
+
+.workflow-canvas-controls {
+  position: relative;
+  width: 100%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: visible;
+}
+
+.workflow-canvas-controls.is-collapsed {
+  gap: 8px;
+}
+
+.workflow-setup-panel,
+.workflow-start-panel {
+  border: 1px solid rgba(0, 242, 254, 0.14);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    rgba(8, 10, 14, 0.9);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+  overflow: visible;
+}
+
+.workflow-setup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: clamp(12px, 1vw, 16px) clamp(13px, 1.1vw, 16px);
+}
+
+.workflow-setup-panel.workflow-input-node {
+  min-height: clamp(160px, 19vh, 190px);
+  overflow: visible;
+}
+
+.workflow-setup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+  gap: 12px;
+}
+
+.workflow-setup-panel .workflow-start-panel {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 0;
+}
+
+.workflow-setup-panel .workflow-start-action {
+  width: auto;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  gap: 6px;
+}
+
+.workflow-start-panel {
+  padding: 6px;
+}
+
+.workflow-canvas-controls-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.workflow-canvas-controls-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-canvas-controls-toggle em {
+  color: var(--text-dim);
+  font-style: normal;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workflow-canvas-controls-toggle > svg:last-child {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  transition: transform 0.18s ease;
+}
+
+.workflow-canvas-controls:not(.is-collapsed) .workflow-canvas-controls-toggle > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.workflow-setup-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 6px;
+  align-items: stretch;
+}
+
+.workflow-setup-form .compact-upload {
+  width: 100%;
+  max-width: none;
+  min-height: 42px;
+  justify-content: flex-start;
+}
+
+.workflow-setup-form .target-job-config {
+  min-width: 0;
+}
+
+.workflow-setup-form .target-job-trigger {
+  width: 100%;
+  min-height: 42px;
+}
+
+.workflow-setup-form .target-job-popover {
+  left: 0;
+  right: auto;
+  z-index: 320;
+  width: min(360px, calc(100vw - 48px));
+}
+
+.workflow-setup-form .target-job-popover::before {
+  left: 28px;
+  right: auto;
+}
+
+.workflow-start-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(0, 242, 254, 0.26);
+  border-radius: 10px;
+  background: rgba(0, 242, 254, 0.075);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 900;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.workflow-start-action:hover:not(:disabled) {
+  border-color: rgba(0, 242, 254, 0.48);
+  background: rgba(0, 242, 254, 0.12);
+  transform: translateY(-1px);
+}
+
+.workflow-start-action:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+

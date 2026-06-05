@@ -1,5 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildCareerMasterPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
+import { buildHrPrompt, formatTargetJobContext } from "@/lib/agents/resume_workflow/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
   reviewerFeedbackSchema,
@@ -8,21 +8,21 @@ import {
   type TargetJob,
 } from "@/lib/review/schemas";
 
-export async function runCareerMasterReviewer(
+export async function runHrReviewer(
   profile: ResumeProfile,
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
   abortSignal?: AbortSignal,
 ): Promise<ReviewerFeedback> {
   const feedback = await invokeStructuredAgent({
-    name: "career_master_agent",
-    systemPrompt: buildCareerMasterPrompt(),
+    name: "hr_agent",
+    systemPrompt: buildHrPrompt(),
     responseFormat: reviewerFeedbackResponseFormatSchema,
     normalize: (value) => reviewerFeedbackSchema.parse(value),
     onProgress,
     abortSignal,
     userContent: `
-请从职业定位、行业竞争力和长期叙事视角审阅这份简历。
+请从 HR / ATS / 招聘筛选视角审阅这份简历。
 
 目标岗位上下文：
 ${formatTargetJobContext(targetJob)}
@@ -34,7 +34,7 @@ ${dumpJson(profile)}
 
   return reviewerFeedbackSchema.parse({
     ...feedback,
-    agentName: feedback.agentName || "career_master_agent",
-    perspective: feedback.perspective || "Career Strategy",
+    agentName: feedback.agentName || "hr_agent",
+    perspective: feedback.perspective || "HR / ATS",
   });
 }

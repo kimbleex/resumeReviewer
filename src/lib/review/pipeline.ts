@@ -1,10 +1,10 @@
 import type { StructuredAgentProgress } from "@/lib/agents/base";
-import { runCareerMasterReviewer } from "@/lib/agents/career-master";
-import { runHrReviewer } from "@/lib/agents/hr";
-import { runInterviewerReviewer } from "@/lib/agents/interviewer";
-import { runResumeParser } from "@/lib/agents/resume-parser";
-import { runSummaryAgent } from "@/lib/agents/summary";
-import { runRewriteAgent } from "@/lib/agents/rewrite";
+import { runCareerMasterReviewer } from "@/lib/agents/resume_workflow/career-master";
+import { runHrReviewer } from "@/lib/agents/resume_workflow/hr";
+import { runInterviewerReviewer } from "@/lib/agents/resume_workflow/interviewer";
+import { runResumeParser } from "@/lib/agents/resume_workflow/resume-parser";
+import { runRewriteAgent } from "@/lib/agents/resume_workflow/rewrite";
+import { runSummaryAgent } from "@/lib/agents/resume_workflow/summary";
 import { loadResumeSource, type ResumeSource } from "@/lib/resume/loader";
 import {
   finalResumeReviewSchema,

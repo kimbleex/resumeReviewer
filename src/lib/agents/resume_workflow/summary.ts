@@ -1,5 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildSummaryPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
+import { buildSummaryPrompt, formatTargetJobContext } from "@/lib/agents/resume_workflow/prompts";
 import {
   finalResumeReviewResponseFormatSchema,
   finalResumeReviewSchema,

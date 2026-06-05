@@ -1,5 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildInterviewerPrompt, formatTargetJobContext } from "@/lib/agents/prompts";
+import { buildInterviewerPrompt, formatTargetJobContext } from "@/lib/agents/resume_workflow/prompts";
 import {
   reviewerFeedbackResponseFormatSchema,
   reviewerFeedbackSchema,

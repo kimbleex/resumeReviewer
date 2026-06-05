@@ -1,5 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildResumeParserPrompt } from "@/lib/agents/prompts";
+import { buildResumeParserPrompt } from "@/lib/agents/resume_workflow/prompts";
 import { extractResumeSignals } from "@/lib/resume/signals";
 import {
   resumeProfileResponseFormatSchema,

@@ -36,10 +36,17 @@ type AgentTurn = {
   error: string;
 };
 
-// 与后端 src/lib/agents/resume-edit.ts 的 ResumeAgentEvent 保持一致。
+type ParsedResumeCache = {
+  fileName: string;
+  charCount: number;
+  content: string;
+};
+
+// 与后端 src/lib/agents/resume_agent_chat/events.ts 的 ResumeAgentEvent 保持一致。
 type AgentEvent =
   | { type: "step"; id: string; tag: "agent" | "model"; title: string; detail?: string; status: TraceStepStatus }
   | { type: "answer-delta"; text: string }
+  | { type: "resume-cache"; parsedResume: ParsedResumeCache }
   | { type: "done"; citation: string }
   | { type: "error"; message: string };
 
@@ -58,10 +65,31 @@ function makeId() {
 
 const TRACE_TAG_LABEL: Record<TraceStep["tag"], string> = {
   agent: "agent",
-  model: "model request",
+  model: "model",
 };
 
 const AgentTraceStep = memo(function AgentTraceStep({ step }: { step: TraceStep }) {
+  const isRunningToolCall = step.status === "running" && step.id.startsWith("tool-");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const runningToolDetail =
+    step.id === "tool-read-resume-pdf" ? `正在解析 PDF，已运行 ${elapsedSeconds} 秒` : `已运行 ${elapsedSeconds} 秒`;
+  const detailText = isRunningToolCall ? runningToolDetail : step.detail;
+
+  useEffect(() => {
+    if (!isRunningToolCall) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isRunningToolCall, step.id]);
+
   return (
     <div className={`agent-trace-step is-${step.status}`}>
       <span className="agent-trace-icon" aria-hidden="true">
@@ -78,7 +106,7 @@ const AgentTraceStep = memo(function AgentTraceStep({ step }: { step: TraceStep 
           <span className={`agent-trace-tag tag-${step.tag}`}>{TRACE_TAG_LABEL[step.tag]}</span>
           <strong className="agent-trace-title">{step.title}</strong>
         </div>
-        {step.detail ? <code className="agent-trace-detail">{step.detail}</code> : null}
+        {detailText ? <code className="agent-trace-detail">{detailText}</code> : null}
       </div>
     </div>
   );
@@ -130,6 +158,7 @@ export function PdfAgentWorkbench() {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentError, setAgentError] = useState("");
+  const [parsedResumeCache, setParsedResumeCache] = useState<ParsedResumeCache | null>(null);
   const objectUrlRef = useRef("");
   const isMountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -181,6 +210,22 @@ export function PdfAgentWorkbench() {
     setTurns((current) => current.map((turn) => (turn.id === turnId ? updater(turn) : turn)));
   }, []);
 
+  const promptPlaceholder = useMemo(() => {
+    if (!isAgentRunning) {
+      return "输入简历修改要求";
+    }
+
+    const latestTurn = turns[turns.length - 1];
+    const runningStep = latestTurn?.steps.find((step) => step.status === "running");
+    if (runningStep?.id === "tool-read-resume-pdf") {
+      return "正在解析 PDF...";
+    }
+    if (runningStep?.id === "generating") {
+      return "正在汇总最终输出...";
+    }
+    return "Agent 正在处理...";
+  }, [isAgentRunning, turns]);
+
   const handlePdfUpload = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.currentTarget.files?.[0] ?? null;
     if (!nextFile) {
@@ -205,6 +250,7 @@ export function PdfAgentWorkbench() {
     setPdfFrameKey((current) => current + 1);
     setLastUpdatedAt(formatTime());
     setAgentError("");
+    setParsedResumeCache(null);
     setTurns([]);
   }, []);
 
@@ -257,7 +303,14 @@ export function PdfAgentWorkbench() {
           id: turnId,
           prompt: trimmedPrompt,
           createdAt: formatTime(),
-          steps: [],
+          steps: [
+            {
+              id: "reading",
+              tag: "agent",
+              title: "模型提取用户问题",
+              status: "running",
+            },
+          ],
           answer: "",
           citation: "",
           status: "running",
@@ -272,6 +325,11 @@ export function PdfAgentWorkbench() {
         if (!isMountedRef.current) {
           return;
         }
+        if (eventPayload.type === "resume-cache") {
+          setParsedResumeCache(eventPayload.parsedResume);
+          return;
+        }
+
         updateTurn(turnId, (turn) => {
           switch (eventPayload.type) {
             case "step": {
@@ -285,7 +343,11 @@ export function PdfAgentWorkbench() {
               const existingIndex = turn.steps.findIndex((step) => step.id === eventPayload.id);
               const steps =
                 existingIndex >= 0
-                  ? turn.steps.map((step, index) => (index === existingIndex ? nextStep : step))
+                  ? turn.steps.map((step, index) =>
+                      index === existingIndex && !(step.status === "done" && nextStep.status === "running")
+                        ? nextStep
+                        : step,
+                    )
                   : [...turn.steps, nextStep];
               return { ...turn, steps };
             }
@@ -317,8 +379,14 @@ export function PdfAgentWorkbench() {
 
       try {
         const formData = new FormData();
-        formData.append("pdfFile", pdfFile);
         formData.append("prompt", trimmedPrompt);
+        if (parsedResumeCache && parsedResumeCache.fileName === pdfFile.name) {
+          formData.append("parsedResumeFileName", parsedResumeCache.fileName);
+          formData.append("parsedResumeCharCount", String(parsedResumeCache.charCount));
+          formData.append("parsedResumeContent", parsedResumeCache.content);
+        } else {
+          formData.append("pdfFile", pdfFile);
+        }
 
         const response = await fetch("/api/pdf-agent", {
           method: "POST",
@@ -374,7 +442,7 @@ export function PdfAgentWorkbench() {
         }
       }
     },
-    [isAgentRunning, pdfFile, pdfPreviewUrl, prompt, updateTurn],
+    [isAgentRunning, parsedResumeCache, pdfFile, pdfPreviewUrl, prompt, updateTurn],
   );
 
   return (
@@ -402,9 +470,8 @@ export function PdfAgentWorkbench() {
             />
           ) : (
             <div className="pdf-empty-state">
-              <FileText size={36} />
+              <FileText size={26} />
               <strong>上传 PDF 后立即在这里预览</strong>
-              <span>左侧使用浏览器原生 PDF 查看器，刷新和下载都会指向当前版本。</span>
             </div>
           )}
         </div>
@@ -463,7 +530,6 @@ export function PdfAgentWorkbench() {
             <div className="agent-empty-hint">
               <Bot size={26} />
               <strong>告诉 RA 你想怎么改这份简历</strong>
-              <span>RA 会先解析 PDF，再按你的要求修改；与改简历无关的问题会被拒绝。</span>
             </div>
           ) : null}
 
@@ -485,6 +551,7 @@ export function PdfAgentWorkbench() {
                 }
               }}
               aria-label="输入简历修改要求"
+              placeholder={promptPlaceholder}
               rows={1}
               disabled={isAgentRunning}
             />

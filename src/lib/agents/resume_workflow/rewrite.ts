@@ -1,5 +1,5 @@
 import { dumpJson, invokeTextAgent, type StructuredAgentProgress } from "@/lib/agents/base";
-import { buildRewritePrompt, formatTargetJobContext } from "@/lib/agents/prompts";
+import { buildRewritePrompt, formatTargetJobContext } from "@/lib/agents/resume_workflow/prompts";
 import {
   resumeRewriteSchema,
   type ResumeRewrite,

@@ -2,9 +2,12 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readAppStyles } from "./style-test-utils";
+
 const workbenchSource = readFileSync(new URL("./pdf-agent-workbench.tsx", import.meta.url), "utf8");
 const studioSource = readFileSync(new URL("./review-studio.tsx", import.meta.url), "utf8");
-const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+const pdfAgentSource = readFileSync(new URL("../lib/agents/resume_agent_chat/agent.ts", import.meta.url), "utf8");
+const styles = readAppStyles(import.meta.url);
 
 function cssRule(selector: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -88,6 +91,31 @@ test("PDF agent drives dynamic trace steps from the real streaming endpoint", ()
   assert.match(workbenchSource, /agent-stage-spinner/);
   assert.doesNotMatch(workbenchSource, /rawModelOutput|streamContent|reasoningText/);
   assert.match(cssRule(".agent-trace-tag.tag-model"), /color:\s*#c4b5fd/);
+});
+
+test("PDF agent progress only shows question extraction, tool calls, and final summary", () => {
+  assert.match(workbenchSource, /模型提取用户问题/);
+  assert.match(workbenchSource, /正在解析 PDF/);
+  assert.match(workbenchSource, /已运行/);
+  assert.match(pdfAgentSource, /模型提取用户问题/);
+  assert.match(pdfAgentSource, /readResumePdf/);
+  assert.match(pdfAgentSource, /调用 .* 工具/);
+  assert.match(pdfAgentSource, /模型汇总最终输出/);
+  assert.doesNotMatch(pdfAgentSource, /tools:\s*\{/);
+  assert.doesNotMatch(pdfAgentSource, /stepCountIs|createReadResumePdfTool/);
+  assert.doesNotMatch(workbenchSource + pdfAgentSource, /模型思考是否需要调用工具|模型分析工具结果|model request/);
+});
+
+test("PDF agent keeps parsed resume memory until another PDF is uploaded", () => {
+  const routeSource = readFileSync(new URL("../app/api/pdf-agent/route.ts", import.meta.url), "utf8");
+  assert.match(workbenchSource, /parsedResumeCache/);
+  assert.match(workbenchSource, /setParsedResumeCache\(null\)/);
+  assert.match(workbenchSource, /resume-cache/);
+  assert.match(workbenchSource, /formData\.append\("parsedResumeContent"/);
+  assert.match(routeSource, /parsedResumeContent/);
+  assert.match(routeSource, /parsedResume:\s*parsedResume/);
+  assert.match(pdfAgentSource, /parsedResume\?:/);
+  assert.match(pdfAgentSource, /复用 read_resume_pdf 解析结果/);
 });
 
 test("PDF agent workbench has a fixed PC split layout", () => {

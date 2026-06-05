@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readAppStyles } from "./style-test-utils";
+
 // The review studio is split across the main container plus the lazily-loaded
 // stage-detail panels and a shared helpers module. Assertions about behavior
 // should hold across the combined source regardless of which file owns a piece.
@@ -13,7 +15,7 @@ const source = [
 ]
   .map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"))
   .join("\n");
-const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+const styles = readAppStyles(import.meta.url);
 
 function cssRule(selector: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
