@@ -35,10 +35,12 @@ import {
   type ResumeProfile,
   type ReviewRunResult,
   type ReviewerFeedback,
+  getReviewCallCheckpoint,
 } from "@/lib/review/schemas";
 
 import { FinalReviewPanel, ReviewerResultPanel, RubricReference } from "@/components/review-report-panels";
 import { rubricForStage, type ReviewerRubricName } from "@/lib/review/rubrics";
+import { getReviewDisplayPayloads, reviewScoringSchema } from "@/lib/review/scoring";
 
 const REVIEWER_STAGES: ReviewerRubricName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
 import {
@@ -180,6 +182,7 @@ function LiveConsole({
                 {logs.map((log, index) => (
                   <div key={index} className={`console-log-line log-type-${log.type || "info"}`}>
                     <span className="log-time">[{log.timestamp}]</span>
+                    {log.callId ? <span className="log-phase">[{log.callLabel} · {log.callId.slice(0, 8)}]</span> : null}
                     <span className="log-phase">[{formatPhaseLabel(log.phase)}]</span>
                     <span className="log-msg">{log.message}</span>
                   </div>
@@ -818,7 +821,7 @@ function RewriteResultPanel({
         <div className="summary-report-title">
           <div className="summary-title-badge">
             <Sparkles size={12} />
-            <span>AI 协同智能改写已完成</span>
+            <span>{explanation ? "AI 协同智能改写已完成" : "正文已就绪，改写说明生成中"}</span>
           </div>
           <div className="summary-title-badge">
             <FileText size={12} />
@@ -966,6 +969,12 @@ const StageResultContent = memo(function StageResultContent({
   if (stage === "resume_loader") {
     return <LoaderResultPanel payload={payload} />;
   }
+  if (stage === "scoring_agent") {
+    const parsed = reviewScoringSchema.safeParse(payload);
+    return parsed.success ? (
+      <FinalReviewPanel review={parsed.data.review} reviewers={parsed.data.reviewers} />
+    ) : <EmptyResultPanel title="评分生成中" detail="评分完成后立即展示，无需等待建议和改写。" />;
+  }
 
   if (stage === "resume_parser") {
     const parsed = resumeProfileSchema.safeParse(payload);
@@ -1030,10 +1039,12 @@ function ResultExplorer({
   const Icon = meta.icon;
   const liveState = stageStreams[selectedStage] ?? EMPTY_STAGE_LIVE_STATE;
   const status = stageStatus[selectedStage];
-  const [activeDetailTab, setActiveDetailTab] = useState<"logs" | "report">("logs");
-  const payload = stagePayloads[selectedStage];
+  const displayPayloads = getReviewDisplayPayloads(stagePayloads);
+  const payload = displayPayloads[selectedStage];
+  const hasPartialResult = Boolean(getReviewCallCheckpoint(stagePayloads[selectedStage]));
+  const [activeDetailTab, setActiveDetailTab] = useState<"logs" | "report">(payload ? "report" : "logs");
   const logCount = liveState.logs?.length ?? 0;
-  const { hr_agent: hrPayload, interviewer_agent: interviewerPayload, career_master_agent: careerPayload } = stagePayloads;
+  const { hr_agent: hrPayload, interviewer_agent: interviewerPayload, career_master_agent: careerPayload } = displayPayloads;
   const reviewers = useMemo(() => {
     const entries = REVIEWER_STAGES.map((name, index) => [name, [hrPayload, interviewerPayload, careerPayload][index]] as const);
     return Object.fromEntries(
@@ -1085,7 +1096,7 @@ function ResultExplorer({
             <FileText size={14} />
             <span>诊断报告</span>
             <span className={`node-detail-tab-status ${payload ? "is-ready" : ""}`}>
-              {payload ? "已生成" : "等待中"}
+              {payload ? (hasPartialResult ? "部分已生成" : stagePayloads[selectedStage] ? "已生成" : "评分已出") : "等待中"}
             </span>
           </button>
         </div>
@@ -1108,7 +1119,7 @@ function ResultExplorer({
                 </span>
                 <span className="console-header-right">
                   <span className="console-log-count">
-                    {payload ? "已生成结构化结果" : "等待数据载入"}
+                    {payload ? (hasPartialResult ? "已展示当前结果，后续内容继续生成" : stagePayloads[selectedStage] ? "已生成结构化结果" : "评分已出，建议将陆续展示") : "等待数据载入"}
                   </span>
                 </span>
               </div>
@@ -1117,7 +1128,7 @@ function ResultExplorer({
                 <div className="structured-panel-wrapper node-report-structured-wrapper">
                   <StageResultContent
                     finalResult={selectedStage === "summary_agent" ? finalResult : null}
-                    payload={stagePayloads[selectedStage]}
+                    payload={payload}
                     reviewers={reviewers}
                     stage={selectedStage}
                   />

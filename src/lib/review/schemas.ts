@@ -582,6 +582,31 @@ export const finalResumeReviewResponseFormatSchema = z.object({
   sectionRevisions: z.array(revisionSuggestionResponseFormatSchemaInternal),
 });
 
+const compactSuggestionSchema = z.object({
+  section: z.string().max(30),
+  priority: z.enum(["high", "medium", "low"]),
+  issue: z.string().max(60),
+  recommendation: z.string().max(100),
+});
+
+export const reviewerAdviceResponseSchema = z.object({
+  reasoningSummary: z.array(z.string().max(80)).max(1),
+  strengths: z.array(z.string().max(60)).max(2),
+  concerns: z.array(z.string().max(60)).max(2),
+  suggestions: z.array(compactSuggestionSchema).max(3),
+});
+export const reviewerAssessmentResponseSchema = reviewerAdviceResponseSchema.omit({ suggestions: true });
+export const reviewerSuggestionsResponseSchema = reviewerAdviceResponseSchema.pick({ suggestions: true });
+
+export const summaryAdviceResponseSchema = z.object({
+  executiveSummary: z.string().max(120),
+  reasoningSummary: z.array(z.string().max(60)).max(2),
+  topPriorities: z.array(z.string().max(60)).max(3),
+  sectionRevisions: z.array(compactSuggestionSchema).max(5),
+});
+export const summaryPrioritiesResponseSchema = summaryAdviceResponseSchema.omit({ sectionRevisions: true });
+export const summaryRevisionsResponseSchema = summaryAdviceResponseSchema.pick({ sectionRevisions: true });
+
 const resumeProfileBaseSchema = z.object({
   candidateName: z.preprocess((value) => coerceString(value), z.string()).default(""),
   personalInfo: personalInfoSchema.default({
@@ -670,6 +695,19 @@ export const resumeRewriteSchema = z.object({
 
 export type ResumeRewrite = z.infer<typeof resumeRewriteSchema>;
 
+// A partial business result is displayable and resumable, but not a completed stage.
+export const reviewCallCheckpointSchema = z.discriminatedUnion("checkpoint", [
+  z.object({ checkpoint: z.literal("assessment"), value: reviewerFeedbackSchema }),
+  z.object({ checkpoint: z.literal("priorities"), value: finalResumeReviewSchema }),
+  z.object({ checkpoint: z.literal("rewrite_content"), value: resumeRewriteSchema }),
+]);
+export type ReviewCallCheckpoint = z.infer<typeof reviewCallCheckpointSchema>;
+
+export function getReviewCallCheckpoint(value: unknown): ReviewCallCheckpoint | null {
+  const parsed = reviewCallCheckpointSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export const reviewRunResultSchema = z.object({
   document: resumeDocumentSchema,
   targetJob: targetJobSchema.optional(),
@@ -687,7 +725,7 @@ export const reviewStageProgressPhaseSchema = z.enum([
 ]);
 
 export const reviewStageEventSchema = z.object({
-  kind: z.enum(["stage_started", "stage_progress", "stage_completed", "pipeline_completed"]),
+  kind: z.enum(["stage_started", "stage_progress", "stage_checkpoint", "stage_completed", "pipeline_completed"]),
   stage: z.string(),
   phase: reviewStageProgressPhaseSchema.nullable().optional().default(null),
   title: z.string(),
@@ -695,6 +733,8 @@ export const reviewStageEventSchema = z.object({
   details: z.array(z.string()).default([]),
   snippet: z.preprocess((value) => coerceString(value), z.string()).optional().default(""),
   payload: z.unknown().nullable().optional().default(null),
+  callId: z.string().optional(),
+  callLabel: z.string().optional(),
 });
 
 export const reviewStreamChunkSchema = z.discriminatedUnion("type", [

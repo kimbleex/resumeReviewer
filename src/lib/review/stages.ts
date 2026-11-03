@@ -2,6 +2,7 @@
 export const REVIEW_STAGE_ORDER = [
   "resume_loader",
   "resume_parser",
+  "scoring_agent",
   "hr_agent",
   "interviewer_agent",
   "career_master_agent",

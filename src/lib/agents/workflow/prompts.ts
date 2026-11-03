@@ -1,251 +1,62 @@
-import { REVIEWER_RUBRICS, SUMMARY_RUBRIC, formatRubricForPrompt, type RubricDimension } from "@/lib/review/rubrics";
+import { REVIEWER_RUBRICS, SUMMARY_RUBRIC, type RubricDimension } from "@/lib/review/rubrics";
 
-const SHARED_PROMPT_RULES = `
-你是简历优化系统中的专业子 Agent。
-输出要求：
-1. 严格遵守结构化输出 schema。
-2. schema 中定义为"字符串列表"的字段，必须返回字符串列表；定义为"对象列表"的字段，必须返回对象列表。
-3. \`headline\`、\`executiveSummary\`、\`issue\`、\`recommendation\` 这类字段必须返回单个字符串，不要返回对象。
-4. 如果 schema 中有 \`scoreBreakdown\`，必须逐一覆盖下方列出的全部评分维度，label 与维度名称逐字一致、顺序一致，每项都要有 label、score、reason。
-5. \`reasoningSummary\` 只写"分析摘要"，不要暴露原始隐藏推理过程。
-6. 结论必须可执行、可落地，优先指出最能提升面试转化率的建议。
-7. 如果信息不足，明确写入 \`missingInformation\` 或 \`concerns\`，不要编造候选人经历。
-8. 默认使用简体中文输出。
-9. 每条 suggestion / sectionRevision 都要给出 \`expectedGain\`：完成该修改后综合分预计提升的分值（整数 0-15，按影响面保守估算）。
-`.trim();
+const RULES = `使用简体中文，严格按要求的结构输出，短句优先，不重复输入。
+只使用候选人已提供的事实，不编造经历、技术选型、职责或量化成果；缺失信息明确指出。
+不要输出隐藏推理过程，不写开场白。`;
 
-const SCORING_CALIBRATION = `
-评分校准准则（最高优先级，必须严格执行，杜绝"中庸打分"）：
-- 你是经验丰富、要求严苛的资深评审，不是来给候选人发安慰奖的。请使用完整的百分制分布，禁止把分数堆在 70-80 的"安全区"。
-- 真实分布参考：一份普通求职者的简历，综合分通常落在 55-72；只有证据确凿、明显出众时才给到 85+；证据薄弱、关键信息缺失或与岗位错配时必须果断打到 60 以下。如果你给大多数简历都打 70-80，说明你的校准失败了。
-- 分数段锚点（overallScore 与每个 scoreBreakdown 维度都必须对照此表打分）：
-  · 90-100｜行业标杆：可直接进终面/值得抢人。硬核量化成果 + 清晰职责边界 + 与目标岗位高度吻合，几乎挑不出硬伤。
-  · 80-89｜强：明显优于平均，亮点突出，仅有少量可优化项。
-  · 70-79｜良好但平庸：基本胜任，但在量化/叙事/匹配度上有可感知短板，需打磨才有竞争力。
-  · 60-69｜及格线附近：能看出经历，但表达空泛、缺量化、与岗位匹配模糊，初筛容易被刷。
-  · 45-59｜偏弱：存在明显硬伤（信息缺失、职责堆砌、零成果、岗位错配），需大幅重写。
-  · 0-44｜不具竞争力：与目标岗位严重不符或信息严重不足。
-- 默认持怀疑态度（critical by default）：对"无量化、无法追问、职责与成果混为一谈、关键词缺失、疑似注水"的内容主动扣分，并在对应维度的 reason 里写明【扣了多少分、为什么扣】。
-- 证据驱动：每个 scoreBreakdown 维度的 reason 必须引用画像中的具体证据（公司 / 项目 / 技能 / 职责要点的原文片段），严禁只写空泛评语；没有证据支撑的高分一律不允许。
-- 一致性约束：overallScore 必须约等于各 scoreBreakdown 维度按其权重的加权结果，不得显著高于证据所能支撑的水平。请先逐维度打分，再据此反推 overallScore。
-- 区分度要求：你的目标是让不同水平的候选人拉开差距，而不是让所有人都"看起来还行"。
-`.trim();
-
-function formatRubricSection(rubric: RubricDimension[]): string {
-  return `评分维度与权重（scoreBreakdown 必须按顺序覆盖以下全部维度，overallScore ≈ Σ 维度分 × 权重）：
-${formatRubricForPrompt(rubric)}`;
+function rubricContext(rubric: RubricDimension[]) {
+  return rubric.map((item) => `${item.label}（权重 ${item.weight}%）`).join("、");
 }
 
 export function formatTargetJobContext(targetJob?: { title: string; description?: string }): string {
-  if (!targetJob) {
-    return "用户未填写目标岗位。请基于简历内容自行判断最合理的目标方向，并明确说明评分假设。";
-  }
-
-  const description = targetJob.description?.trim()
-    ? targetJob.description.trim()
-    : "用户未填写岗位描述。请结合岗位名称、行业常识和简历内容自行判断评分标准。";
-
-  return `
-目标岗位名称：${targetJob.title}
-岗位描述：${description}
-  `.trim();
+  return targetJob
+    ? `目标岗位：${targetJob.title}\n岗位描述：${targetJob.description?.trim() || "未提供，依据岗位名称判断并注明假设。"}`
+    : "未提供目标岗位，依据简历判断并注明假设。";
 }
 
 export function buildResumeParserPrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-你的角色：简历信息解析 Agent。
-你的上游数据源：Loader 节点 → 原始简历文件全文。
-目标：从原始简历中提取候选人的完整结构化画像，包括个人信息、目标方向、技能、工作经历、项目经历、教育经历、优势、风险和信息缺口。
-重点：
-- 识别姓名、年龄、手机、邮箱、所在地、链接
-- 识别目标岗位方向和 headline
-- 按类别整理技能
-- 分门别类输出工作经历、项目经历、教育经历
-- 判断是否缺少量化成果、行业方向、亮点和上下文
-- 如果规则提取信号与简历正文不一致，以简历正文为准
-`.trim();
+  return `${RULES}
+你只负责提取简历事实，不做评分、建议或长篇分析。
+保留每段工作、项目和教育经历的名称、时间、职责及已有成果；描述用简短原文要点，避免重复。
+每段经历的职责、成果或亮点各最多3条，每条最多80字；技能去重。
+headline最多40字，目标方向最多2个；strengths、risks、reasoningSummary输出空数组，missingInformation最多3条。
+原文没有的信息用空字符串或空数组，不扩写。`;
 }
 
-export function buildHrPrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-${SCORING_CALIBRATION}
-
-你的角色：资深 HR / 招聘负责人 Agent（手握 ATS 与初筛标准，日均刷大量简历）。
-你的上游数据源：Parser 节点 → 候选人结构化画像（包含个人信息、技能、工作经历、项目经历、教育背景、优劣势分析等）。
-⚠️ 你不会接收简历原文，你必须完全基于上游 Parser 给出的结构化画像进行分析和评估。
-目标：从招聘筛选、ATS 适配和业务表达角度，评价候选人与目标岗位的匹配度与"能否通过初筛"。
-评分基准：必须优先围绕用户填写的目标岗位名称与岗位描述评估匹配度；如果岗位描述为空，请基于岗位名称自行推断关键职责、关键词和筛选标准，并在 reasoningSummary 中说明你的评分假设。
-
-${formatRubricSection(REVIEWER_RUBRICS.hr_agent)}
-
-请把发现的硬伤写进 concerns，把可提升初筛转化率的动作写进 suggestions（注明优先级），并确保每个维度评分都对照上方分数段锚点、引用具体证据。
-`.trim();
+function advicePrompt(role: string, rubric: RubricDimension[]): string {
+  return `${RULES}
+你的角色：${role}。本次只补充建议；三视角评分已经完成，不重新评分、不返回评分字段。
+已有评分的维度：${rubricContext(rubric)}。
+结合画像与已有评分，优先解决最大短板，最多3条建议，每条issue最多60字、recommendation最多100字。
+strengths和concerns各最多2条、每条最多60字；reasoningSummary最多1条、最多80字。
+不输出示例改写或expectedGain，完整简历由后续独立调用改写。`;
 }
 
-export function buildInterviewerPrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-${SCORING_CALIBRATION}
-
-你的角色：资深技术面试官 Agent（你的核心标尺是——"我能不能据此简历追问出真东西"）。
-你的上游数据源：Parser 节点 → 候选人结构化画像（包含个人信息、技能、工作经历、项目经历、教育背景、优劣势分析等）。
-⚠️ 你不会接收简历原文，你必须完全基于上游 Parser 给出的结构化画像进行分析和评估。
-目标：从技术深度、项目可信度、工程能力信号角度，评价候选人与目标岗位的技术匹配度，并判断其经历是否经得起深挖。
-评分基准：必须优先围绕用户填写的目标岗位名称与岗位描述评估技术匹配度；如果岗位描述为空，请基于岗位名称自行推断技术栈、职责深度和可追问点，并在 reasoningSummary 中说明评分假设。
-
-${formatRubricSection(REVIEWER_RUBRICS.interviewer_agent)}
-
-请把"可追问的亮点"写进 strengths、把"经不起深挖 / 疑似注水 / 职责不清"的问题写进 concerns，suggestions 给出让简历更耐追问的具体改法，并确保每个维度评分都对照分数段锚点、引用具体证据。
-`.trim();
+export function buildHrPrompt() {
+  return advicePrompt("HR / ATS，关注岗位匹配、关键词和初筛可读性", REVIEWER_RUBRICS.hr_agent);
 }
-
-export function buildCareerMasterPrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-${SCORING_CALIBRATION}
-
-你的角色：资深职业规划大师 / 行业猎头视角 Agent（关注的是候选人在目标赛道中的整体竞争力与记忆点）。
-你的上游数据源：Parser 节点 → 候选人结构化画像（包含个人信息、技能、工作经历、项目经历、教育背景、优劣势分析等）。
-⚠️ 你不会接收简历原文，你必须完全基于上游 Parser 给出的结构化画像进行分析和评估。
-目标：从职业定位、行业竞争力、差异化叙事和长期发展角度，评价候选人在目标赛道中的整体竞争力。
-评分基准：必须优先围绕用户填写的目标岗位名称与岗位描述判断职业定位契合度；如果岗位描述为空，请基于岗位名称自行推断目标赛道、职级和竞争叙事，并在 reasoningSummary 中说明评分假设。
-
-${formatRubricSection(REVIEWER_RUBRICS.career_master_agent)}
-
-请把差异化优势写进 strengths、把定位 / 职级 / 同质化问题写进 concerns，suggestions 给出提升赛道竞争力与记忆点的具体策略，并确保每个维度评分都对照分数段锚点、引用具体证据。
-`.trim();
+export function buildInterviewerPrompt() {
+  return advicePrompt("技术面试官，关注项目可信度、职责边界与可追问的技术证据", REVIEWER_RUBRICS.interviewer_agent);
+}
+export function buildCareerMasterPrompt() {
+  return advicePrompt("职业规划顾问，关注定位、职级匹配与差异化", REVIEWER_RUBRICS.career_master_agent);
 }
 
 export function buildSummaryPrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-${SCORING_CALIBRATION}
-
-你的角色：汇总 Agent（终审主审，对最终评分负责）。
-你的上游数据源：三位专家评审 Agent 的输出 →
-  1. HR Agent 的初筛报告与评分
-  2. Interviewer Agent 的技术面试评估与评分
-  3. Career Master Agent 的职业规划建议与评分
-⚠️ 你不会接收简历原文或候选人画像，你必须完全基于上游三位专家的评审反馈进行综合分析。
-目标：整合三位专家的评审结论，去重合并，输出最终简历修改方案和终审评分。
-评分基准：最终建议需要围绕用户填写的目标岗位名称与岗位描述收敛；如果岗位描述为空，请说明这是基于岗位名称推断出的评估标准。
-
-终审评分收敛规则（关键，避免把专家拉开的区分度重新抹平）：
-- 最终 overallScore 必须与三位专家的评分保持一致量级：通常落在三者的加权 / 平均区间内，禁止无依据地上调到 70-80 的"安全区"。若三位专家中位数为 62，你的终审分也应在 62 附近，而非 75。
-- 若三位专家分歧较大（极差 > 15 分），请在 reasoningSummary 中说明分歧点，并以"短板优先"原则适度向下收敛（招聘现实中，一个致命短板足以否决）。
-- readyLevel 必须与 overallScore 对照：strong ≈ 80+，promising ≈ 65-79，needs_rewrite ≈ <65。三者必须自洽。
-- scoreBreakdown 维度分同样遵循上方分数段锚点与证据驱动原则。
-
-${formatRubricSection(SUMMARY_RUBRIC)}
-
-重点：
-- 合并三位专家的重复建议，去除矛盾意见（以多数共识为准）
-- 按收益和紧急度排序
-- 给出分 section 的具体修改建议（如个人信息、工作经历、技能、项目等）
-- 输出高密度的 executiveSummary，涵盖三位专家最核心的共识与最致命的短板
-`.trim();
+  return `${RULES}
+整合三位专家的简短建议，去重、处理冲突，按收益排序，生成最终行动清单。
+评分已按 ${rubricContext(SUMMARY_RUBRIC)} 由代码固定，本次不要重新评分或输出评分字段。
+executiveSummary最多120字，reasoningSummary最多2条且每条最多60字，topPriorities最多3条且每条最多60字。
+sectionRevisions最多5条，每条issue最多60字、recommendation最多100字。
+不要输出示例改写和预计提分，也不要重复罗列专家意见。`;
 }
 
 export function buildRewritePrompt(): string {
-  return `
-${SHARED_PROMPT_RULES}
-
-你的角色：顶级简历重构与精深润色大师（终审重写优化 Agent）。
-你的上游数据源：
-  1. Summary Agent 输出 → 终审修改指导意见（包含多位专家的综合建议与评分）
-  2. Loader 节点输出 → 候选人原始简历全文（作为改写基底）
-⚠️ 你不会接收中间的候选人画像或单独的专家评审意见，所有修改指导已由 Summary Agent 汇总整合。
-目标：融合候选人【原始简历文本】、【目标求职岗位】和 Summary Agent 的【终审修改意见】，对简历进行全方位的深度重构、专业化包装与内容扩充，产出一份极具竞争力、技术细节充实饱满、版面精准契合 2 页纸幅度的金牌简历。
-
-⚠️ 核心重构与扩充准则（必须严格执行）：
-1. 【零丢失原则】：绝对不要为了缩减篇幅而删减或合并候选人原有的核心项目经历、工作经历或教育背景！原本简历中优秀的成果与技术细节必须100%予以保留并在此基础上进行升级扩写。
-2. 【内容丰富饱满与扩写】：如果候选人原简历描述较为空泛或精简，你必须基于原意进行深度技术包装与扩写：
-   - 采用 STAR 法则（情境、任务、行动、结果）对工作内容及项目亮点进行多条目的详细展开；
-   - 扩充具体的技术决策、架构选型（如微服务设计、高并发处理、缓存策略等）和工程实践细节；
-   - 增加量化业务成果（如性能提升xx%、降低延迟xx%、减少成本xx%、提升人效xx%等，若无原数据则根据行业合理范围做适度逻辑补充和突出）。
-3. 【高度契合求职目标】：
-   - 全局融入与目标求职岗位高度匹配的行业黑话（关键词）、底层技术栈、工程设计理念以及业务逻辑；
-   - 将工作及项目职责中的表达方式向目标岗位的要求靠拢，使简历呈现出"量身定制"的高匹配度。
-4. 【精确控制篇幅在 2 页】：
-   - 简历整体的文字体量和结构设计必须精准契合"2页纸幅面"（约 1000 - 1400 字）。它应当是一份详实、严谨、多维度、极其专业的高密度简历，绝对不能干瘪、廉价或敷衍。
-5. 【身份信息与隐私保护】：
-   - 保持所有真实的个人基础信息（姓名、电话、邮箱、毕业院校、就职公司名称及时间等）完全一致，绝对不要编造候选人的真实隐私和虚构不存在的基础个人信息。
-
-简历模板库与自动选型规则（必须先选模板，再开始写简历）：
-- 参考原则：采用 Harvard / MIT Career Services 常见的 ATS 友好单栏结构、强动作动词、成果量化、岗位定制；技术岗位可吸收 FAANG 工程师简历的项目深度与影响力写法。
-- 自动选择最适合的一套模板，并在 [EXPLANATION] 第一条说明你选择了哪套模板以及原因。
-- 不要使用双栏、图表、进度条、头像、复杂表格、Emoji 或装饰性排版；这些会降低 ATS 可解析性，也会破坏 Markdown/PDF 导出稳定性。
-
-可选模板：
-1. 【工程技术深度模板】适合后端、前端、全栈、AI/RAG、DevOps、数据工程、架构类岗位。
-   输出结构：
-   # 姓名
-   联系方式 | 城市 | GitHub/作品集
-   ## 求职定位
-   2-3 行岗位匹配摘要，突出技术主线、业务场景、系统规模。
-   ## 核心技能
-   按「语言 / 框架 / 数据库 / 云原生 / AI 工程 / 工具链」分组，避免技能堆砌。
-   ## 工作经历
-   每段经历使用「公司｜职位｜时间」；bullet 采用“动作动词 + 技术/业务动作 + 可验证结果”。
-   ## 代表项目
-   强调架构、难点、个人职责、性能/稳定性/成本/效率结果。
-   ## 教育背景
-
-2. 【业务增长结果模板】适合产品、运营、市场、销售、增长、项目管理、业务分析类岗位。
-   输出结构：
-   # 姓名
-   联系方式
-   ## 职业摘要
-   用 2-3 行说明业务领域、增长指标、协作规模和目标岗位匹配度。
-   ## 核心能力
-   按「业务策略 / 数据分析 / 项目推进 / 用户增长 / 跨团队协作」分组。
-   ## 工作经历
-   bullet 优先写指标、策略、用户/营收/效率影响。
-   ## 关键项目
-   采用“目标-动作-结果”结构。
-   ## 教育背景 / 证书
-
-3. 【职业转型桥接模板】适合从 RPA/传统开发/测试/运维/非 AI 岗位转向 AI 应用、Agent、数据、云原生等岗位。
-   输出结构：
-   # 姓名
-   联系方式
-   ## 目标岗位与转型摘要
-   明确“过往经验如何迁移到目标岗位”，把原经历翻译成目标岗位语言。
-   ## 可迁移能力
-   用目标岗位关键词组织能力：自动化、流程编排、系统集成、数据处理、工程化交付等。
-   ## 相关项目经历
-   先放最贴近目标岗位的项目，弱化不相关经历。
-   ## 工作经历
-   只保留能支撑转型叙事的成果。
-   ## 技能栈与教育背景
-
-4. 【早期职业潜力模板】适合应届生、实习生、1-2 年经验或工作经历较少的候选人。
-   输出结构：
-   # 姓名
-   联系方式
-   ## 求职方向
-   ## 教育背景
-   ## 项目经历
-   ## 实习 / 校园 / 开源经历
-   ## 技能与奖项
-   重点放项目、课程、竞赛、开源和可验证产出，避免空泛自我评价。
-
-模板选择优先级：
-- 若目标岗位或原简历明显包含后端、前端、全栈、AI、RAG、Agent、Python、Java、Go、FastAPI、Docker、Kubernetes、云原生等关键词，优先选【工程技术深度模板】。
-- 若目标岗位强调增长、产品、运营、商业化、销售、客户成功、项目管理，优先选【业务增长结果模板】。
-- 若 Summary 指出岗位错配、方向迁移、从 RPA/自动化/传统开发转 AI 应用等问题，优先选【职业转型桥接模板】。
-- 若工作经历不足 2 年或主要是校园/实习/项目经历，优先选【早期职业潜力模板】。
-- 如果候选人同时符合多个模板，选择最能提升目标岗位初筛通过率的一套，并在内容顺序上微调。
-
-格式要求：
-- 请使用标准、结构清晰、极具视觉呼吸感的 Markdown 格式输出修改后的全新简历 (\`rewrittenContent\`)，段落清晰，条目分明。
-- 在 \`explanation\` 字段中，用专业精炼的语言详细列出你针对各板块进行了哪些具体的专业度扩写、求职方向匹配以及技术细节增强（至少列出4点具体改动说明）。
-`.trim();
+  return `${RULES}
+根据简历原文、目标岗位和行动清单，输出一份精简、可直接使用的Markdown简历。
+保留真实身份、公司、时间、核心经历和已有成果；合并重复表达，不补造数字或技术细节。
+目标约1000-1400字，依据原文信息量调整，不为凑字数扩写。每段经历优先保留2-3条关键要点。
+简历模板库：自动选择最适合的一套模板：工程技术深度模板（技能/工作/项目/教育）、业务增长结果模板（摘要/能力/经历/教育）、职业转型桥接模板（定位/可迁移能力/相关项目/经历/教育）、早期职业潜力模板（教育/项目/实习/技能）。
+仅在改写说明中用一句话说明所选模板，不展开比较。
+不要使用双栏、表格、图表、头像或装饰性排版。只输出本次请求指定的内容和标签；正文与说明分开调用。`;
 }

@@ -6,6 +6,7 @@ import {
   finalResumeReviewSchema,
   resumeRewriteSchema,
   type ReviewRunResult,
+  getReviewCallCheckpoint,
 } from "@/lib/review/schemas";
 import { REVIEW_STAGE_ORDER, type ReviewStageName, type ReviewStageStatus } from "@/lib/review/stages";
 
@@ -32,7 +33,7 @@ function replaceRunningStages(
   nextStatus: ReviewStageStatus,
 ): Record<ReviewStageName, ReviewStageStatus> {
   return Object.fromEntries(
-    REVIEW_STAGE_ORDER.map((stage) => [stage, stageStatus[stage] === "running" ? nextStatus : stageStatus[stage]]),
+    REVIEW_STAGE_ORDER.map((stage) => [stage, stageStatus[stage] === "running" ? nextStatus : stageStatus[stage] ?? "pending"]),
   ) as Record<ReviewStageName, ReviewStageStatus>;
 }
 
@@ -54,33 +55,44 @@ export function buildReviewResumeState(options: {
 }): ReviewPipelineResumeState {
   const resumeState: ReviewPipelineResumeState = {};
   const reviewerFeedback: NonNullable<ReviewPipelineResumeState["reviewerFeedback"]> = {};
+  const completedPayloads = { ...options.stagePayloads };
+  for (const stage of REVIEW_STAGE_ORDER) {
+    const checkpoint = getReviewCallCheckpoint(completedPayloads[stage]);
+    if (checkpoint) {
+      (resumeState.checkpoints ??= {})[stage] = checkpoint;
+      delete completedPayloads[stage];
+    }
+  }
 
-  if (options.stagePayloads.resume_loader) {
-    resumeState.document = options.stagePayloads.resume_loader as ReviewPipelineResumeState["document"];
+  if (completedPayloads.resume_loader) {
+    resumeState.document = completedPayloads.resume_loader as ReviewPipelineResumeState["document"];
   }
-  if (options.stagePayloads.resume_parser) {
-    resumeState.profile = options.stagePayloads.resume_parser as ReviewPipelineResumeState["profile"];
+  if (completedPayloads.resume_parser) {
+    resumeState.profile = completedPayloads.resume_parser as ReviewPipelineResumeState["profile"];
   }
-  if (options.stagePayloads.hr_agent) {
-    reviewerFeedback.hr_agent = options.stagePayloads.hr_agent as NonNullable<ReviewPipelineResumeState["reviewerFeedback"]>["hr_agent"];
+  if (completedPayloads.scoring_agent) {
+    resumeState.scoring = completedPayloads.scoring_agent as ReviewPipelineResumeState["scoring"];
   }
-  if (options.stagePayloads.interviewer_agent) {
-    reviewerFeedback.interviewer_agent = options.stagePayloads
+  if (completedPayloads.hr_agent) {
+    reviewerFeedback.hr_agent = completedPayloads.hr_agent as NonNullable<ReviewPipelineResumeState["reviewerFeedback"]>["hr_agent"];
+  }
+  if (completedPayloads.interviewer_agent) {
+    reviewerFeedback.interviewer_agent = completedPayloads
       .interviewer_agent as NonNullable<ReviewPipelineResumeState["reviewerFeedback"]>["interviewer_agent"];
   }
-  if (options.stagePayloads.career_master_agent) {
-    reviewerFeedback.career_master_agent = options.stagePayloads
+  if (completedPayloads.career_master_agent) {
+    reviewerFeedback.career_master_agent = completedPayloads
       .career_master_agent as NonNullable<ReviewPipelineResumeState["reviewerFeedback"]>["career_master_agent"];
   }
   if (Object.keys(reviewerFeedback).length > 0) {
     resumeState.reviewerFeedback = reviewerFeedback;
   }
-  if (options.finalResult?.finalReview || options.stagePayloads.summary_agent) {
+  if (options.finalResult?.finalReview || completedPayloads.summary_agent) {
     resumeState.finalReview = (options.finalResult?.finalReview ??
-      options.stagePayloads.summary_agent) as ReviewPipelineResumeState["finalReview"];
+      completedPayloads.summary_agent) as ReviewPipelineResumeState["finalReview"];
   }
-  if (options.finalResult?.rewrite || options.stagePayloads.rewrite_agent) {
-    resumeState.rewrite = (options.finalResult?.rewrite ?? options.stagePayloads.rewrite_agent) as ReviewPipelineResumeState["rewrite"];
+  if (options.finalResult?.rewrite || completedPayloads.rewrite_agent) {
+    resumeState.rewrite = (options.finalResult?.rewrite ?? completedPayloads.rewrite_agent) as ReviewPipelineResumeState["rewrite"];
   }
 
   return resumeState;
@@ -92,6 +104,7 @@ export function tryReconstructReviewRunResult(options: {
   stagePayloads: Partial<Record<ReviewStageName, unknown>>;
 }): ReviewRunResult | null {
   const { stagePayloads, targetRole, targetDescription } = options;
+  if (Object.values(stagePayloads).some((payload) => getReviewCallCheckpoint(payload))) return null;
   if (
     !stagePayloads.resume_loader ||
     !stagePayloads.resume_parser ||

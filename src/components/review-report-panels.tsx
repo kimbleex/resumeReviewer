@@ -327,9 +327,9 @@ export function ReviewerResultPanel({ feedback, stage }: { feedback: ReviewerFee
           detail={`高优先级 ${highCount} 条`}
         />
         <ReportStat
-          label="预计可达"
-          value={totalGain > 0 ? `${projected} 分` : "—"}
-          detail={totalGain > 0 ? `全部完成后 +${totalGain} 分` : "模型未给出提升预估"}
+          label={totalGain > 0 ? "预计可达" : "评分证据"}
+          value={totalGain > 0 ? `${projected} 分` : `${feedback.scoreBreakdown.length} 项`}
+          detail={totalGain > 0 ? `全部完成后 +${totalGain} 分` : "各维度附简短事实依据"}
           tone="good"
         />
       </div>
@@ -362,7 +362,7 @@ export function ReviewerResultPanel({ feedback, stage }: { feedback: ReviewerFee
       <section className="clean-detail-section">
         <SectionHeading
           title="修改建议"
-          description="按优先级与预计提分排序。"
+          description="优先处理关键短板；完整改写将在后续步骤生成。"
           aside={totalGain > 0 ? `合计 +${totalGain} 分` : undefined}
         />
         <SuggestionTable suggestions={feedback.suggestions} />
@@ -437,24 +437,24 @@ export function FinalReviewPanel({
         <ReportStat
           label="专家加权分"
           value={expertWeighted === null ? "—" : String(expertWeighted)}
-          detail={expertWeighted === null ? "等待专家评分" : `终审 ${formatSigned(review.overallScore - expertWeighted)} 校准`}
+          detail={expertWeighted === null ? "等待专家评分" : "总分按加权结果四舍五入"}
         />
         <ReportStat
           label="专家分歧"
           value={spread === null ? "—" : `${spread} 分`}
-          detail={spread === null ? "专家不足 2 位" : spread > 15 ? "分歧较大，按短板收敛" : "共识较一致"}
+          detail={spread === null ? "专家不足 2 位" : spread > 15 ? "视角差异较大，优先关注短板" : "共识较一致"}
           tone={spread !== null && spread > 15 ? "warn" : undefined}
         />
         <ReportStat
-          label="预计可达"
-          value={totalGain > 0 ? `${Math.min(100, review.overallScore + totalGain)} 分` : "—"}
-          detail={totalGain > 0 ? `完成 ${review.sectionRevisions.length} 项修改 +${totalGain}` : `${review.topPriorities.length} 项优先事项`}
+          label={totalGain > 0 ? "预计可达" : "修改行动"}
+          value={totalGain > 0 ? `${Math.min(100, review.overallScore + totalGain)} 分` : `${review.sectionRevisions.length} 项`}
+          detail={totalGain > 0 ? `完成 ${review.sectionRevisions.length} 项修改 +${totalGain}` : "建议完成后陆续展示"}
           tone="good"
         />
       </div>
 
       <section className="clean-detail-section summary-section">
-        <SectionHeading title="专家加权构成" description="终审基准 = Σ 专家分 × 权重，再按短板优先原则校准。" />
+        <SectionHeading title="专家加权构成" description="综合评分 = Σ 视角分 × 权重，四舍五入取整。后续建议不改变评分。" />
         <div className="summary-agent-strip">
           {reviewerRows.map((row) => (
             <div key={row.name} className="summary-agent-item">
@@ -504,7 +504,7 @@ export function FinalReviewPanel({
       <section className="clean-detail-section summary-section">
         <SectionHeading
           title="逐板块修改建议"
-          description="按优先级与预计提分排序。"
+          description="按优先级排列，合并各专家的重复意见。"
           aside={totalGain > 0 ? `合计 +${totalGain} 分` : undefined}
         />
         <SuggestionTable suggestions={review.sectionRevisions} />

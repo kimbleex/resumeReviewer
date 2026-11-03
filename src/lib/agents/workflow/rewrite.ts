@@ -6,6 +6,7 @@ import {
   type ResumeDocument,
   type FinalResumeReview,
   type TargetJob,
+  type ReviewCallCheckpoint,
 } from "@/lib/review/schemas";
 
 function extractTaggedSection(text: string, tag: string): string {
@@ -20,42 +21,46 @@ export async function runRewriteAgent(
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
   abortSignal?: AbortSignal,
+  checkpoint?: ReviewCallCheckpoint,
+  onCheckpoint?: (checkpoint: ReviewCallCheckpoint) => void,
 ): Promise<ResumeRewrite> {
-  const text = await invokeTextAgent({
-    name: "rewrite_agent",
-    systemPrompt: buildRewritePrompt(),
+  let rewrittenContent = checkpoint?.checkpoint === "rewrite_content" ? checkpoint.value.rewrittenContent : "";
+  if (!rewrittenContent) {
+    const text = await invokeTextAgent({
+      name: "rewrite_content",
+      callLabel: "改写 · 简历正文",
+      systemPrompt: buildRewritePrompt(),
+      onProgress,
+      abortSignal,
+      userContent: `本次只生成完整Markdown简历，不写改写说明，不输出JSON。严格使用以下标签：
+[REWRITTEN_CONTENT]
+完整Markdown简历
+[/REWRITTEN_CONTENT]
+${formatTargetJobContext(targetJob)}
+原始简历：${document.content}
+修改行动：${dumpJson({ topPriorities: finalReview.topPriorities, sectionRevisions: finalReview.sectionRevisions })}`,
+    });
+    rewrittenContent = extractTaggedSection(text, "REWRITTEN_CONTENT");
+    if (!rewrittenContent) throw new Error("改写正文不完整，请从正文步骤重试。");
+  }
+  if (abortSignal?.aborted) throw new Error("诊断已被中断。");
+  onCheckpoint?.({ checkpoint: "rewrite_content", value: { rewrittenContent, explanation: "" } });
+
+  const explanationText = await invokeTextAgent({
+    name: "rewrite_explanation",
+    callLabel: "改写 · 修改说明",
+    systemPrompt: "用简体中文简短说明已完成的实际修改，不重写简历，不编造改动。最多3条、每条60字。第一条说明使用的模板。",
+    userContent: `本次只生成改写说明，严格使用标签：
+[EXPLANATION]
+改写说明
+[/EXPLANATION]
+${formatTargetJobContext(targetJob)}
+原始简历：${document.content}
+已完成的简历正文：${rewrittenContent}`,
     onProgress,
     abortSignal,
-    userContent: `
-请根据终审修改意见，为候选人深度改写、优化并生成一份全新的 Markdown 格式简历。
-不要输出 JSON。请严格使用以下两个纯文本分段标签，标签必须原样保留：
-
-[REWRITTEN_CONTENT]
-这里输出完整 Markdown 简历
-[/REWRITTEN_CONTENT]
-
-[EXPLANATION]
-这里输出 4-6 条本次改写说明
-[/EXPLANATION]
-
-目标岗位上下文：
-${formatTargetJobContext(targetJob)}
-
-原始简历内容：
-${document.content}
-
-终审汇总修改指导（来自 Summary Agent 的完整终审意见）：
-${dumpJson(finalReview)}
-    `.trim(),
   });
-
-  const rewrittenContent = extractTaggedSection(text, "REWRITTEN_CONTENT") || text.trim();
-  const explanation =
-    extractTaggedSection(text, "EXPLANATION") ||
-    "已根据 Summary Agent 的终审意见完成简历重构，强化岗位匹配度、项目表达、技术细节与结果呈现。";
-
-  return resumeRewriteSchema.parse({
-    rewrittenContent,
-    explanation,
-  });
+  const explanation = extractTaggedSection(explanationText, "EXPLANATION");
+  if (!explanation) throw new Error("改写说明不完整，请重试说明步骤，已完成正文会保留。");
+  return resumeRewriteSchema.parse({ rewrittenContent, explanation });
 }

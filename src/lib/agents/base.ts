@@ -15,6 +15,8 @@ export type StructuredAgentProgress = {
   details?: string[];
   snippet?: string;
   payload?: unknown;
+  callId?: string;
+  callLabel?: string;
 };
 
 function readPositiveIntegerEnv(name: string, fallback: number): number {
@@ -60,7 +62,7 @@ export function createStructuredAgentProgressTracker(options: {
       });
       emitProgress({
         phase: "model_thinking",
-        message: "模型已接收请求，正在分析输入。",
+        message: "正在等待模型分析并返回结果。",
       });
     },
     recordReasoningStarted() {
@@ -94,7 +96,7 @@ export function createStructuredAgentProgressTracker(options: {
       const elapsedSeconds = Math.max(0, Math.round((now() - startedAt) / 1000));
       const phaseMessages: Record<StructuredAgentPhase, string> = {
         requesting_model: `正在等待模型响应… (${elapsedSeconds}s)`,
-        model_thinking: `模型正在深度思考与推理中… (${elapsedSeconds}s, 已推理 ${reasoningChunks} 轮)`,
+        model_thinking: `模型正在深度思考与推理中… (${elapsedSeconds}s, 收到 ${reasoningChunks} 个推理片段)`,
         streaming_output: `模型正在生成结构化结果… (${elapsedSeconds}s)`,
         validating_output: `正在校验输出结构… (${elapsedSeconds}s)`,
       };
@@ -108,7 +110,7 @@ export function createStructuredAgentProgressTracker(options: {
 }
 
 export function dumpJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
+  return JSON.stringify(value);
 }
 
 function cleanStructuredText(text: string): string {
@@ -189,6 +191,7 @@ function tryRecoverResult<TResponseFormat extends z.ZodTypeAny, TResult>(options
 
 type AgentRunOptions = {
   name: string;
+  callLabel?: string;
   systemPrompt: string;
   userContent: string;
   onProgress?: (event: StructuredAgentProgress) => void;
@@ -202,9 +205,21 @@ type StreamCapture = {
 };
 
 function startAgentRun(options: AgentRunOptions) {
+  const callId = globalThis.crypto.randomUUID();
+  const startedAt = Date.now();
+  const callLabel = options.callLabel ?? ({
+    resume_parser: "事实提取",
+    scoring_agent: "三视角评分",
+    hr_agent: "HR 建议",
+    interviewer_agent: "面试官建议",
+    career_master_agent: "职业定位建议",
+    summary_agent: "行动清单",
+    rewrite_agent: "简历改写",
+  } as Record<string, string>)[options.name] ?? options.name;
+  const report = (event: StructuredAgentProgress) => options.onProgress?.({ ...event, callId, callLabel });
   const progress = createStructuredAgentProgressTracker({
     name: options.name,
-    onProgress: options.onProgress,
+    onProgress: report,
   });
   progress.start();
 
@@ -215,6 +230,7 @@ function startAgentRun(options: AgentRunOptions) {
     prompt: options.userContent,
     abortSignal: options.abortSignal,
     timeout: getStructuredAgentTimeout(),
+    maxRetries: 0,
     onError({ error }: { error: unknown }) {
       capture.failure = error;
     },
@@ -243,7 +259,17 @@ function startAgentRun(options: AgentRunOptions) {
     }
   }
 
-  return { capture, streamOptions, consume, stop: () => clearInterval(heartbeatTimer) };
+  function complete(usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number }) {
+    report({
+      phase: "validating_output",
+      message: `${callLabel}调用完成 · ${Math.round((Date.now() - startedAt) / 1000)} 秒`,
+      details: [
+        `输入 ${usage.inputTokens ?? "未知"} token · 输出 ${usage.outputTokens ?? "未知"} token · 推理 ${usage.reasoningTokens ?? "未知"} token`,
+        `结束原因: ${capture.finishReason || "未知"}`,
+      ],
+    });
+  }
+  return { capture, streamOptions, consume, report, complete, stop: () => clearInterval(heartbeatTimer) };
 }
 
 export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny, TResult>(
@@ -265,23 +291,33 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
   try {
     const output = await result.output;
 
-    options.onProgress?.({
+    run.report({
       phase: "validating_output",
       message: "正在校验最终结构化结果。",
       details: run.capture.finishReason ? [`finish_reason: ${run.capture.finishReason}`] : [],
     });
 
     await fullStreamTask;
-    return options.normalize(output as z.infer<TResponseFormat>);
+    if (run.capture.finishReason === "length") {
+      throw new Error("模型输出被截断，请从当前步骤重试。");
+    }
+    const normalized = options.normalize(output as z.infer<TResponseFormat>);
+    run.complete(await result.totalUsage);
+    return normalized;
   } catch (error) {
     await Promise.allSettled([fullStreamTask]);
 
-    options.onProgress?.({
+    run.report({
       phase: "validating_output",
       message: "最终结果校验失败，正在尝试恢复可用结构。",
       details: [structuredAgentErrorMessage(error)],
     });
 
+    if (options.abortSignal?.aborted || run.capture.failure || run.capture.finishReason === "length") {
+      throw new Error(run.capture.finishReason === "length"
+        ? "模型输出被截断，请从当前步骤重试。"
+        : structuredAgentErrorMessage(run.capture.failure ?? error));
+    }
     const recovered = tryRecoverResult({
       responseFormat: options.responseFormat,
       normalize: options.normalize,
@@ -289,11 +325,12 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     });
 
     if (recovered) {
-      options.onProgress?.({
+      run.report({
         phase: "validating_output",
         message: "已从增量输出中恢复结构化结果。",
         details: ["采用流式片段完成最终解析。"],
       });
+      run.complete(await result.totalUsage);
       return recovered;
     }
 
@@ -314,15 +351,21 @@ export async function invokeTextAgent(options: AgentRunOptions): Promise<string>
       throw run.capture.failure;
     }
 
-    options.onProgress?.({
+    if (options.abortSignal?.aborted) throw new Error("诊断已被中断。");
+    if (run.capture.finishReason === "length") {
+      throw new Error("模型输出被截断，请从当前步骤重试。");
+    }
+    if (!run.capture.text.trim()) throw new Error("模型未返回有效正文，请重试该步骤。");
+    run.report({
       phase: "validating_output",
       message: "正在整理最终文本结果。",
       details: run.capture.finishReason ? [`finish_reason: ${run.capture.finishReason}`] : [],
     });
 
+    run.complete(await result.totalUsage);
     return run.capture.text.trim();
   } catch (error) {
-    options.onProgress?.({
+    run.report({
       phase: "validating_output",
       message: "文本结果生成失败，正在结束本次 Agent 调用。",
       details: [structuredAgentErrorMessage(error)],

@@ -14,22 +14,21 @@ By leveraging a pipeline of specialized AI agents, the platform extracts a candi
 
 ## 🌟 Key Features & Highlights | 核心特色与功能亮点
 
-### 1. 🚀 7-Stage Collaborative Multi-Agent Pipeline | 七阶段智能协同流水线
-The pipeline processes tasks asynchronously/concurrently according to dependency trees, streaming real-time stage progress and metrics to the frontend UI:
+### 1. Progressive Results | 先评分、再建议、后改写
 
-系统按照严格的依赖关系进行异步/并发流式处理，并在浏览器前端实时渲染阶段进度与流式指标：
+The workflow publishes each completed result immediately. A single scoring call evaluates three perspectives; code calculates the weighted scores. Short advice calls reuse those scores, followed by an action list and one final rewrite.
 
-1. 📂 **Resume Loader (简历读取器)**: Parses raw PDF and Word (.docx) files.
-2. 🔍 **Resume Parser (候选人画像解析)**: Extracts personal contact info, skill matrices, and core experiences.
-3. 💼 **HR Agent (招聘初筛专家)**: Critiques ATS compatibility, business metrics quantization, and role matching.
-4. 💻 **Interviewer Agent (资深技术面试官)**: Evaluates technical stack depth, architectural choices, and system design credibility.
-5. 🧭 **Career Master Agent (职业规划大师)**: Provides advice on unique career narratives, positioning, and market competitiveness.
-6. 📊 **Summary Agent (多维度诊断汇总)**: Merges all feedback into actionable, section-by-section optimization guidelines.
-7. ✨ **Resume Rewrite Agent (终审重写优化专家)**:
-   - **Zero Loss Principle (零丢失原则)**: 100% preserves original experiences; no lazy truncation or summarization.
-   - **STAR Methodology (STAR 深度扩写)**: Enhances thin bullets with structured Context, Action, and quantifiable Results.
-   - **Target Job Alignment (精准求职对齐)**: Infuses matching industry terminology and keywords tailored to the target role.
-   - **Golden 2-Page Layout (黄金 2 页控制)**: strictly optimized visual harmony within `1000 - 1400` words.
+流程：**读取 → 事实解析 → 三视角评分 → 三位专家并行补充建议 → 行动清单 → 简历改写**。
+
+- **先看评分**：一次调用输出 HR、面试官、职业定位各5个维度的分数与短证据；代码计算各视角总分及 35% / 35% / 30% 的综合分。评分完成后，评分卡片、专家卡片和报告立即可查看，无需等建议与改写完成。
+- **逐步补齐建议**：每位专家最多3条建议，不再重复打分、生成示例改写或猜测提分；汇总最多5条去重后的修改行动。
+- **一次完整改写**：保留真实事实，参考1000–1400字目标，说明最多3条。缺少成果数字或技术细节时不编造。
+- **分步断点**：评分独立保存；刷新或中断后可继续。仅有评分的预览不标记为建议已完成，每位专家完成后单独缓存。
+- **每次调用可追踪**：实时日志显示调用名称、调用ID、请求/推理/输出/校验阶段，完成时显示耗时、token用量及结束原因（用量以供应商返回为准）。不展示隐藏推理原文。
+
+默认一次完整流程共12次模型调用（读取文件不调用模型）：事实解析、三视角评分、每位专家各2次（优势与问题→修改建议）、汇总2次（优先行动→逐板块建议）、改写2次（正文→改写说明）。三个专家各自依次执行，其间保持并行；每个小步骤完成后立即展示并保存断点。
+
+应用不设置输出 token 上限，通过拆分业务内容、简短提示词与精简字段减少单次生成量。总耗时仍受模型推理和请求开销影响；每次调用关闭自动重试，失败后从已完成的小步骤继续。旧版缺少评分断点的任务只复用原文和画像。
 
 ### 2. 🔑 Bring Your Own Model | 自带模型配置
 - Click **模型配置** in the top-right corner, pick a protocol and fill in `base_url`, `api_key` and `model_name`.
@@ -77,7 +76,7 @@ src/
     agents/
       base.ts               # Streaming agent runner | Agent 调用基座
       resume-chat.ts        # Agent Chat (resume Q&A / editing) | 简历对话 Agent
-      workflow/             # Parser / reviewers / summary / rewrite agents | 评审流水线 Agent
+      workflow/             # Parser / scoring / advice / summary / rewrite agents | 评审流水线 Agent
     llm/
       config.ts             # Protocols, config schema, FormData helpers | 协议与配置校验
       model.ts              # Per-request model factory (AsyncLocalStorage) | 按请求创建模型

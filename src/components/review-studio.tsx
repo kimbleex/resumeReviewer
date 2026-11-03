@@ -66,6 +66,8 @@ function getStagesToReset(startStage: StageName): StageName[] {
     return [...STAGE_ORDER];
   } else if (startStage === "resume_parser") {
     return STAGE_ORDER.slice(1);
+  } else if (startStage === "scoring_agent") {
+    return STAGE_ORDER.slice(2);
   } else if (parallelReviewers.includes(startStage)) {
     return [startStage, "summary_agent", "rewrite_agent"];
   } else if (startStage === "summary_agent") {
@@ -100,15 +102,17 @@ function applyStageProgressEvent(
   const newLog: StageLogEntry = {
     timestamp,
     phase: nextPhase,
-    message: event.message,
+    message: [event.message, ...event.details].join(" · "),
     type: "info",
+    callId: event.callId,
+    callLabel: event.callLabel,
   };
 
   const prevLogs = current.logs || [];
   let updatedLogs = [...prevLogs];
   const lastLog = prevLogs[prevLogs.length - 1];
 
-  if (lastLog && lastLog.phase === newLog.phase && lastLog.message === newLog.message) {
+  if (lastLog && lastLog.callId === newLog.callId && lastLog.phase === newLog.phase && lastLog.message === newLog.message) {
     updatedLogs[updatedLogs.length - 1] = {
       ...lastLog,
       timestamp,
@@ -141,6 +145,8 @@ function sanitizeStageLiveState(value: unknown): StageLiveState {
         phase: (typeof log.phase === "string" ? log.phase : null) as ReviewStageProgressPhase | null,
         message: typeof log.message === "string" ? log.message : "",
         type: (log.type === "success" || log.type === "error" ? log.type : "info") as StageLogEntry["type"],
+        callId: typeof log.callId === "string" ? log.callId : undefined,
+        callLabel: typeof log.callLabel === "string" ? log.callLabel : undefined,
       }))
       .filter((log) => log.message)
       .slice(-24)
@@ -197,7 +203,7 @@ export function ReviewStudio() {
   const runningStagesRef = useRef<StageName[]>([]);
   const selectedStageRef = useRef<StageName>("resume_loader");
   const hasLocalCheckpoint = hasReusableReviewState(stagePayloads);
-  const canResumeLocalRun = Boolean(currentRunId && hasLocalCheckpoint && !finalResult && !resumeFile);
+  const canResumeLocalRun = Boolean(currentRunId && hasLocalCheckpoint && !finalResult);
   const uploadLabel = resumeFile ? resumeFile.name : cachedResumeFileName || "点击选择简历文件";
   const uploadHint = resumeFile
     ? `${formatFileSize(resumeFile.size)} · 点击更换`
@@ -393,18 +399,26 @@ export function ReviewStudio() {
     setIsTargetJobOpen((previous) => !previous);
   }, [targetDescription, targetRole]);
   const handleSaveTargetJob = useCallback(() => {
+    if (isRunning) return;
     const nextRole = targetRoleDraft.trim();
     if (!nextRole) {
       setInputError("target");
       return;
     }
 
+    if (nextRole !== targetRole || targetDescriptionDraft.trim() !== targetDescription) {
+      const resetStages = getStagesToReset("scoring_agent");
+      setStagePayloads((previous) => Object.fromEntries(Object.entries(previous).filter(([stage]) => !resetStages.includes(stage as StageName))));
+      setStageStreams((previous) => Object.fromEntries(Object.entries(previous).filter(([stage]) => !resetStages.includes(stage as StageName))));
+      setStageStatus((previous) => ({ ...previous, ...Object.fromEntries(resetStages.map((stage) => [stage, "pending"])) }));
+      setFinalResult(null);
+    }
     setTargetRole(nextRole);
     setTargetDescription(targetDescriptionDraft.trim());
     setIsTargetJobOpen(false);
     setInputError(null);
     setErrorMessage("");
-  }, [targetDescriptionDraft, targetRoleDraft]);
+  }, [isRunning, targetDescription, targetDescriptionDraft, targetRole, targetRoleDraft]);
 
   async function handleChunkStream(response: Response) {
     if (!response.body) {
@@ -495,6 +509,13 @@ export function ReviewStudio() {
     }
 
     setTimeline((previous) => [...previous, `${event.title}: ${event.message}`].slice(-20));
+
+    if (event.kind === "stage_checkpoint" && stage && event.payload) {
+      flushPendingProgressEvents();
+      setStagePayloads((previous) => ({ ...previous, [stage]: event.payload }));
+      setStageStreams((previous) => applyStageProgressEvent(previous, stage, event));
+      return;
+    }
 
     if (event.kind === "stage_started" && stage) {
       flushPendingProgressEvents();
@@ -757,7 +778,7 @@ export function ReviewStudio() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const isResumingLocalRun = !resumeFile && hasLocalCheckpoint;
+    const isResumingLocalRun = canResumeLocalRun;
 
     if (!resumeFile && !isResumingLocalRun) {
       setInputError("resume");
@@ -850,6 +871,7 @@ export function ReviewStudio() {
           <label className={`compact-upload ${hasResumeSource ? "is-filled" : ""}`} title={uploadLabel}>
             <input
               type="file"
+              disabled={isRunning}
               accept=".txt,.md,.pdf,.docx"
               onChange={(event) => {
                 const nextFile = event.currentTarget.files?.[0] ?? null;
@@ -857,6 +879,10 @@ export function ReviewStudio() {
                 if (nextFile) {
                   setCachedResumeFileName(nextFile.name);
                   setCurrentRunId(null);
+                  setStagePayloads({});
+                  setStageStatus(createInitialStageStatus());
+                  setStageStreams({});
+                  setFinalResult(null);
                   setInputError(null);
                   setErrorMessage("");
                 }
