@@ -106,6 +106,57 @@ Optional: copy `.env.template` to `.env` to tune agent timeouts (`AGENT_TOTAL_TI
 
 ---
 
+## Docker Deployment | 服务器 Docker 部署
+
+服务器需安装 Docker Engine 和 Compose 插件。将本仓库上传或克隆到服务器，
+在项目根目录执行：
+
+```bash
+docker compose up -d --build
+docker compose logs -f --tail=100 app
+```
+
+访问 `http://服务器IP:3000`（需要服务器允许访问该端口）。
+模型连接仍在网页右上角配置。镜像使用 Next.js standalone，
+不需要 Cloudflare 绑定或 R2。构建阶段会安装依赖并执行一次 Next.js 构建。
+
+Compose 默认设置单次模型调用总超时 300 秒、流式数据块等待超时 150 秒。
+可在根目录 `.env` 中覆盖（Compose 自动读取此文件，镜像不包含它）：
+
+```dotenv
+APP_PORT=3000
+AGENT_TOTAL_TIMEOUT_MS=300000
+AGENT_CHUNK_TIMEOUT_MS=150000
+```
+
+修改环境变量后运行 `docker compose up -d`。更新代码后运行：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+停止服务用 `docker compose down`。如果已有 Nginx 反向代理，
+在对应 `location /` 中配置流式转发，例如：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+    client_max_body_size 20m;
+}
+```
+
+该示例假设 Nginx 直接运行在宿主机。域名与 HTTPS 在反向代理中配置。
+应用超时无法覆盖上游模型服务自身的超时或错误。
+
 ## Cloudflare Workers Deployment | Cloudflare 部署
 
 Cloudflare Workers Builds settings:

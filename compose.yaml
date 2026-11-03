@@ -1,0 +1,16 @@
+services:
+  app:
+    image: resume-reviewer:local
+    build: .
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      AGENT_TOTAL_TIMEOUT_MS: "${AGENT_TOTAL_TIMEOUT_MS:-300000}"
+      AGENT_CHUNK_TIMEOUT_MS: "${AGENT_CHUNK_TIMEOUT_MS:-150000}"
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

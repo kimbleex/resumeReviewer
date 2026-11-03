@@ -1,0 +1,14 @@
+node_modules
+.next
+.open-next
+.wrangler
+.git
+.env
+.env.*
+!.env.template
+.dev.vars
+.dev.vars.*
+*.tsbuildinfo
+coverage
+dist
+*.log

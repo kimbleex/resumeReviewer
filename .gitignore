@@ -4,6 +4,7 @@ node_modules/
 .open-next/
 .wrangler/
 coverage/
+dist/
 *.tsbuildinfo
 
 # Local env
