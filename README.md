@@ -106,6 +106,36 @@ Optional: copy `.env.template` to `.env` to tune agent timeouts (`AGENT_TOTAL_TI
 
 ---
 
+## Cloudflare Workers Deployment | Cloudflare 部署
+
+Cloudflare Workers Builds settings:
+
+| Setting / 设置 | Value / 值 |
+| --- | --- |
+| Build command / 构建命令 | `pnpm run build:cloudflare` |
+| Deploy command / 部署命令 | `pnpm run deploy` |
+
+OpenNext runs `next build` internally. Do not add a separate `pnpm run build` step.
+OpenNext 会自动执行 Next.js 构建；部署命令仅部署已有产物，避免重复构建。
+Wrangler 和 OpenNext 已加入项目依赖，配置与锁文件应一并提交。
+
+`wrangler.jsonc` uses `resumereviewer` for both the Worker name and
+`WORKER_SELF_REFERENCE`. Keep both values aligned with the Cloudflare Worker.
+The R2 binding reuses the existing `resume-mutil-agent-opennext-cache` bucket;
+create that bucket first if deploying to a different account.
+
+Worker 名称与自引用绑定统一为 `resumereviewer`。R2 绑定复用已有的
+`resume-mutil-agent-opennext-cache` 桶；如更换账户，需先创建该桶。
+
+```bash
+# Build and preview locally / 本地构建并预览
+pnpm run preview
+
+# Build, then deploy / 构建后部署（需要 Cloudflare 认证）
+pnpm run build:cloudflare
+pnpm run deploy
+```
+
 ## 🧪 Verification & Unit Testing | 静态校验与单元测试
 
 Execute the built-in test suite covering multi-agent stream pipelines and UI structure validations:
