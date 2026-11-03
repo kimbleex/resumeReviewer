@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { generateText, Output } from "ai";
+import { z } from "zod";
 
 import { LLM_PROTOCOLS, appendLlmConfigToFormData, parseLlmConfigFromFormData, type LlmConfig } from "@/lib/llm/config";
 import { createLanguageModel } from "@/lib/llm/model";
@@ -42,4 +44,35 @@ test("each protocol maps to its own provider endpoint", () => {
 
 test("createLanguageModel requires a request-scoped config", () => {
   assert.throws(() => createLanguageModel(), /模型配置/);
+});
+
+test("messages structured output avoids forced tools and still validates JSON", async (t) => {
+  let responseText = '{"name":"Ada"}';
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    assert.equal(body.tool_choice, undefined);
+    assert.ok(!body.tools?.length);
+    assert.match(JSON.stringify(body.system), /single JSON object/);
+    assert.match(body.system.map((part: { text: string }) => part.text).join("\n"), /"name"/);
+    return new Response(JSON.stringify({
+      id: "msg_test",
+      type: "message",
+      role: "assistant",
+      model: "test-model",
+      content: [{ type: "text", text: responseText }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }), { headers: { "content-type": "application/json" } });
+  });
+
+  const call = () => generateText({
+    model: createLanguageModel(config),
+    prompt: "Parse the resume",
+    output: Output.object({ schema: z.object({ name: z.string() }) }),
+    maxRetries: 0,
+  });
+  assert.deepEqual((await call()).output, { name: "Ada" });
+  responseText = '{"name":123}';
+  await assert.rejects(async () => (await call()).output);
 });
