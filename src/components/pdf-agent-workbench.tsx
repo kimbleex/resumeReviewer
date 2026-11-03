@@ -13,6 +13,10 @@ import {
   Upload,
 } from "lucide-react";
 
+import type { ParsedResumeMemory, ResumeAgentEvent } from "@/lib/agents/resume-chat";
+import { appendLlmConfigToFormData } from "@/lib/llm/config";
+import { readRequiredLlmConfig } from "@/lib/llm/storage";
+
 type TraceStepStatus = "running" | "done" | "failed";
 
 type TraceStep = {
@@ -36,19 +40,6 @@ type AgentTurn = {
   error: string;
 };
 
-type ParsedResumeCache = {
-  fileName: string;
-  charCount: number;
-  content: string;
-};
-
-// 与后端 src/lib/agents/resume_agent_chat/events.ts 的 ResumeAgentEvent 保持一致。
-type AgentEvent =
-  | { type: "step"; id: string; tag: "agent" | "model"; title: string; detail?: string; status: TraceStepStatus }
-  | { type: "answer-delta"; text: string }
-  | { type: "resume-cache"; parsedResume: ParsedResumeCache }
-  | { type: "done"; citation: string }
-  | { type: "error"; message: string };
 
 function formatTime(date = new Date()) {
   return date.toLocaleTimeString("zh-CN", {
@@ -158,7 +149,7 @@ export function PdfAgentWorkbench() {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentError, setAgentError] = useState("");
-  const [parsedResumeCache, setParsedResumeCache] = useState<ParsedResumeCache | null>(null);
+  const [parsedResumeCache, setParsedResumeCache] = useState<ParsedResumeMemory | null>(null);
   const objectUrlRef = useRef("");
   const isMountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -291,6 +282,11 @@ export function PdfAgentWorkbench() {
       if (isAgentRunning) {
         return;
       }
+      const llmConfigCheck = readRequiredLlmConfig();
+      if (!llmConfigCheck.ok) {
+        setAgentError(llmConfigCheck.message);
+        return;
+      }
 
       setAgentError("");
       setIsAgentRunning(true);
@@ -321,7 +317,7 @@ export function PdfAgentWorkbench() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const applyEvent = (eventPayload: AgentEvent) => {
+      const applyEvent = (eventPayload: ResumeAgentEvent) => {
         if (!isMountedRef.current) {
           return;
         }
@@ -380,6 +376,7 @@ export function PdfAgentWorkbench() {
       try {
         const formData = new FormData();
         formData.append("prompt", trimmedPrompt);
+        appendLlmConfigToFormData(formData, llmConfigCheck.config);
         if (parsedResumeCache && parsedResumeCache.fileName === pdfFile.name) {
           formData.append("parsedResumeFileName", parsedResumeCache.fileName);
           formData.append("parsedResumeCharCount", String(parsedResumeCache.charCount));
@@ -414,7 +411,7 @@ export function PdfAgentWorkbench() {
             buffer = buffer.slice(newlineIndex + 1);
             if (line) {
               try {
-                applyEvent(JSON.parse(line) as AgentEvent);
+                applyEvent(JSON.parse(line) as ResumeAgentEvent);
               } catch {
                 // 跳过无法解析的行，保持流式继续。
               }

@@ -1,10 +1,8 @@
 import type { StructuredAgentProgress } from "@/lib/agents/base";
-import { runCareerMasterReviewer } from "@/lib/agents/resume_workflow/career-master";
-import { runHrReviewer } from "@/lib/agents/resume_workflow/hr";
-import { runInterviewerReviewer } from "@/lib/agents/resume_workflow/interviewer";
-import { runResumeParser } from "@/lib/agents/resume_workflow/resume-parser";
-import { runRewriteAgent } from "@/lib/agents/resume_workflow/rewrite";
-import { runSummaryAgent } from "@/lib/agents/resume_workflow/summary";
+import { runResumeParser } from "@/lib/agents/workflow/resume-parser";
+import { reviewerAgents, type ReviewerAgent } from "@/lib/agents/workflow/reviewers";
+import { runRewriteAgent } from "@/lib/agents/workflow/rewrite";
+import { runSummaryAgent } from "@/lib/agents/workflow/summary";
 import { loadResumeSource, type ResumeSource } from "@/lib/resume/loader";
 import {
   finalResumeReviewSchema,
@@ -24,38 +22,16 @@ import {
   type ResumeRewrite,
   targetJobSchema,
 } from "@/lib/review/schemas";
+import type { ReviewStageName } from "@/lib/review/stages";
 
-export const reviewStageOrder = [
-  "resume_loader",
-  "resume_parser",
-  "hr_agent",
-  "interviewer_agent",
-  "career_master_agent",
-  "summary_agent",
-  "rewrite_agent",
-] as const;
-
-export type ReviewStageName = (typeof reviewStageOrder)[number] | "review_pipeline";
-
-export type ReviewerAgentExecutor = {
-  name: "hr_agent" | "interviewer_agent" | "career_master_agent";
-  perspective: string;
-  run: (
-    profile: ResumeProfile,
-    targetJob: TargetJob,
-    onProgress?: (event: StructuredAgentProgress) => void,
-    abortSignal?: AbortSignal,
-  ) => Promise<ReviewerFeedback>;
-};
-
-export type ReviewPipelineDependencies = {
+type ReviewPipelineDependencies = {
   loadResume: (input: ResumeSource) => Promise<ResumeDocument>;
   runResumeParser: (
     document: ResumeDocument,
     onProgress?: (event: StructuredAgentProgress) => void,
     abortSignal?: AbortSignal,
   ) => Promise<ResumeProfile>;
-  reviewerAgents: ReviewerAgentExecutor[];
+  reviewerAgents: ReviewerAgent[];
   runSummary: (
     reviewerFeedback: ReviewerFeedback[],
     targetJob: TargetJob,
@@ -74,7 +50,7 @@ export type ReviewPipelineDependencies = {
 export type ReviewPipelineResumeState = {
   document?: ResumeDocument;
   profile?: ResumeProfile;
-  reviewerFeedback?: Partial<Record<ReviewerAgentExecutor["name"], ReviewerFeedback>>;
+  reviewerFeedback?: Partial<Record<ReviewerAgent["name"], ReviewerFeedback>>;
   finalReview?: FinalResumeReview;
   rewrite?: ResumeRewrite;
 };
@@ -82,18 +58,14 @@ export type ReviewPipelineResumeState = {
 const defaultDependencies: ReviewPipelineDependencies = {
   loadResume: loadResumeSource,
   runResumeParser,
-  reviewerAgents: [
-    { name: "hr_agent", perspective: "HR / ATS", run: runHrReviewer },
-    { name: "interviewer_agent", perspective: "Technical Interviewer", run: runInterviewerReviewer },
-    { name: "career_master_agent", perspective: "Career Strategy", run: runCareerMasterReviewer },
-  ],
+  reviewerAgents,
   runSummary: runSummaryAgent,
   runRewrite: runRewriteAgent,
 };
 
-export type ReviewEventHandler = (event: ReviewStageEvent) => void;
+type ReviewEventHandler = (event: ReviewStageEvent) => void;
 
-const stageTitles: Record<Exclude<ReviewStageName, "review_pipeline">, string> = {
+const stageTitles: Record<ReviewStageName, string> = {
   resume_loader: "Resume Loader",
   resume_parser: "Resume Parser",
   hr_agent: "HR Agent",
@@ -137,7 +109,7 @@ function normalizeResumeState(state: ReviewPipelineResumeState | null | undefine
 
 function emitCachedStageCompleted(
   handler: ReviewEventHandler | undefined,
-  stage: Exclude<ReviewStageName, "review_pipeline">,
+  stage: ReviewStageName,
   payload: unknown,
   details: string[] = [],
 ): void {
@@ -155,7 +127,7 @@ function emitCachedStageCompleted(
 
 function emitStageProgress(
   handler: ReviewEventHandler | undefined,
-  stage: Exclude<ReviewStageName, "review_pipeline">,
+  stage: ReviewStageName,
   progress: StructuredAgentProgress,
 ): void {
   emit(handler, {

@@ -305,6 +305,11 @@ function coerceScoreDetailItem(value: unknown): UnknownRecord {
   return { label: coerceString(value, "Score"), score: 0, reason: "" };
 }
 
+function coerceGain(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(coerceString(value).replace(/[^\d.]/g, ""));
+  return Number.isFinite(parsed) ? Math.min(15, Math.max(0, Math.round(parsed))) : 0;
+}
+
 function coerceScoreBreakdownList(value: unknown): UnknownRecord[] {
   if (value == null) {
     return [];
@@ -536,6 +541,7 @@ const revisionSuggestionResponseFormatSchemaInternal = z.object({
   issue: z.string(),
   recommendation: z.string(),
   exampleRewrite: z.string(),
+  expectedGain: z.number().int().min(0).max(15),
 });
 
 export const resumeProfileResponseFormatSchema = z.object({
@@ -627,6 +633,7 @@ export const revisionSuggestionSchema = z.object({
   issue: z.preprocess((value) => coerceString(value), z.string()),
   recommendation: z.preprocess((value) => coerceString(value), z.string()),
   exampleRewrite: z.preprocess((value) => coerceString(value), z.string()).default(""),
+  expectedGain: z.preprocess((value) => coerceGain(value), z.number().int().min(0).max(15)).default(0),
 });
 
 export const reviewerFeedbackSchema = z.preprocess(
@@ -656,11 +663,6 @@ export const finalResumeReviewSchema = z.preprocess(
   }),
 );
 
-export const resumeRewriteResponseFormatSchema = z.object({
-  rewrittenContent: z.string(),
-  explanation: z.string(),
-});
-
 export const resumeRewriteSchema = z.object({
   rewrittenContent: z.preprocess((value) => coerceString(value), z.string()).default(""),
   explanation: z.preprocess((value) => coerceString(value), z.string()).default(""),
@@ -676,7 +678,6 @@ export const reviewRunResultSchema = z.object({
   finalReview: finalResumeReviewSchema,
   rewrite: resumeRewriteSchema.optional(),
 });
-
 
 export const reviewStageProgressPhaseSchema = z.enum([
   "requesting_model",
@@ -713,12 +714,7 @@ export const reviewStreamChunkSchema = z.discriminatedUnion("type", [
 
 export type ResumeDocument = z.infer<typeof resumeDocumentSchema>;
 export type TargetJob = z.infer<typeof targetJobSchema>;
-export type PersonalInfo = z.infer<typeof personalInfoSchema>;
 export type ResumeSignalHints = z.infer<typeof resumeSignalHintsSchema>;
-export type SkillGroup = z.infer<typeof skillGroupSchema>;
-export type WorkExperience = z.infer<typeof workExperienceSchema>;
-export type ProjectExperience = z.infer<typeof projectExperienceSchema>;
-export type EducationRecord = z.infer<typeof educationRecordSchema>;
 export type ScoreDetail = z.infer<typeof scoreDetailSchema>;
 export type ResumeProfile = z.infer<typeof resumeProfileSchema>;
 export type RevisionSuggestion = z.infer<typeof revisionSuggestionSchema>;

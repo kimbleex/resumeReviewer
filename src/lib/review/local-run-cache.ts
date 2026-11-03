@@ -7,29 +7,16 @@ import {
   resumeRewriteSchema,
   type ReviewRunResult,
 } from "@/lib/review/schemas";
-
-export const LOCAL_REVIEW_STAGE_ORDER = [
-  "resume_loader",
-  "resume_parser",
-  "hr_agent",
-  "interviewer_agent",
-  "career_master_agent",
-  "summary_agent",
-  "rewrite_agent",
-] as const;
-
-export type LocalReviewStageName = (typeof LOCAL_REVIEW_STAGE_ORDER)[number];
-export type LocalReviewStageStatus = "pending" | "running" | "done" | "interrupted" | "failed";
+import { REVIEW_STAGE_ORDER, type ReviewStageName, type ReviewStageStatus } from "@/lib/review/stages";
 
 export type LocalReviewRunSnapshot = {
-  ownerKey: string;
   runId: string;
   resumeFileName: string;
   targetRole: string;
   targetDescription: string;
-  stageStatus: Record<LocalReviewStageName, LocalReviewStageStatus>;
-  stagePayloads: Partial<Record<LocalReviewStageName, unknown>>;
-  stageStreams: Partial<Record<LocalReviewStageName, unknown>>;
+  stageStatus: Record<ReviewStageName, ReviewStageStatus>;
+  stagePayloads: Partial<Record<ReviewStageName, unknown>>;
+  stageStreams: Partial<Record<ReviewStageName, unknown>>;
   finalResult: ReviewRunResult | null;
   updatedAt: number;
 };
@@ -37,49 +24,32 @@ export type LocalReviewRunSnapshot = {
 const DB_NAME = "resume-review-local-runs";
 const DB_VERSION = 1;
 const STORE_NAME = "runs";
+// 无登录体系后只保留当前浏览器的一份断点记录。
+const LOCAL_OWNER_KEY = "local";
 
-export function createInitialLocalStageStatus(): Record<LocalReviewStageName, LocalReviewStageStatus> {
-  return {
-    resume_loader: "pending",
-    resume_parser: "pending",
-    hr_agent: "pending",
-    interviewer_agent: "pending",
-    career_master_agent: "pending",
-    summary_agent: "pending",
-    rewrite_agent: "pending",
-  };
+function replaceRunningStages(
+  stageStatus: Record<ReviewStageName, ReviewStageStatus>,
+  nextStatus: ReviewStageStatus,
+): Record<ReviewStageName, ReviewStageStatus> {
+  return Object.fromEntries(
+    REVIEW_STAGE_ORDER.map((stage) => [stage, stageStatus[stage] === "running" ? nextStatus : stageStatus[stage]]),
+  ) as Record<ReviewStageName, ReviewStageStatus>;
 }
 
-export function interruptRunningStages(
-  stageStatus: Record<LocalReviewStageName, LocalReviewStageStatus>,
-): Record<LocalReviewStageName, LocalReviewStageStatus> {
-  return LOCAL_REVIEW_STAGE_ORDER.reduce(
-    (nextStatus, stage) => ({
-      ...nextStatus,
-      [stage]: stageStatus[stage] === "running" ? "interrupted" : stageStatus[stage],
-    }),
-    {} as Record<LocalReviewStageName, LocalReviewStageStatus>,
-  );
+export function interruptRunningStages(stageStatus: Record<ReviewStageName, ReviewStageStatus>) {
+  return replaceRunningStages(stageStatus, "interrupted");
 }
 
-export function failRunningStages(
-  stageStatus: Record<LocalReviewStageName, LocalReviewStageStatus>,
-): Record<LocalReviewStageName, LocalReviewStageStatus> {
-  return LOCAL_REVIEW_STAGE_ORDER.reduce(
-    (nextStatus, stage) => ({
-      ...nextStatus,
-      [stage]: stageStatus[stage] === "running" ? "failed" : stageStatus[stage],
-    }),
-    {} as Record<LocalReviewStageName, LocalReviewStageStatus>,
-  );
+export function failRunningStages(stageStatus: Record<ReviewStageName, ReviewStageStatus>) {
+  return replaceRunningStages(stageStatus, "failed");
 }
 
-export function hasReusableReviewState(stagePayloads: Partial<Record<LocalReviewStageName, unknown>>): boolean {
+export function hasReusableReviewState(stagePayloads: Partial<Record<ReviewStageName, unknown>>): boolean {
   return Boolean(stagePayloads.resume_loader);
 }
 
 export function buildReviewResumeState(options: {
-  stagePayloads: Partial<Record<LocalReviewStageName, unknown>>;
+  stagePayloads: Partial<Record<ReviewStageName, unknown>>;
   finalResult: ReviewRunResult | null;
 }): ReviewPipelineResumeState {
   const resumeState: ReviewPipelineResumeState = {};
@@ -119,7 +89,7 @@ export function buildReviewResumeState(options: {
 export function tryReconstructReviewRunResult(options: {
   targetRole: string;
   targetDescription: string;
-  stagePayloads: Partial<Record<LocalReviewStageName, unknown>>;
+  stagePayloads: Partial<Record<ReviewStageName, unknown>>;
 }): ReviewRunResult | null {
   const { stagePayloads, targetRole, targetDescription } = options;
   if (
@@ -137,7 +107,7 @@ export function tryReconstructReviewRunResult(options: {
     const finalReview = finalResumeReviewSchema.parse(stagePayloads.summary_agent);
     const rewrite = resumeRewriteSchema.parse(stagePayloads.rewrite_agent);
 
-    const reviewerFeedback: any[] = [];
+    const reviewerFeedback: ReviewRunResult["reviewerFeedback"] = [];
     if (stagePayloads.hr_agent) {
       reviewerFeedback.push(reviewerFeedbackSchema.parse(stagePayloads.hr_agent));
     }
@@ -159,12 +129,10 @@ export function tryReconstructReviewRunResult(options: {
       finalReview,
       rewrite,
     };
-  } catch (error) {
-    console.error("Failed to reconstruct ReviewRunResult from stage payloads:", error);
+  } catch {
     return null;
   }
 }
-
 
 function canUseIndexedDb(): boolean {
   return typeof indexedDB !== "undefined";
@@ -215,24 +183,17 @@ export async function saveLocalReviewRun(snapshot: LocalReviewRunSnapshot): Prom
   await runStoreTransaction("readwrite", (store) =>
     store.put({
       ...snapshot,
+      ownerKey: LOCAL_OWNER_KEY,
       updatedAt: Date.now(),
     }),
   );
 }
 
-export async function loadLocalReviewRun(ownerKey: string): Promise<LocalReviewRunSnapshot | null> {
+export async function loadLocalReviewRun(): Promise<LocalReviewRunSnapshot | null> {
   if (!canUseIndexedDb()) {
     return null;
   }
 
-  const result = await runStoreTransaction("readonly", (store) => store.get(ownerKey));
+  const result = await runStoreTransaction("readonly", (store) => store.get(LOCAL_OWNER_KEY));
   return (result as LocalReviewRunSnapshot | undefined) ?? null;
-}
-
-export async function clearLocalReviewRun(ownerKey: string): Promise<void> {
-  if (!canUseIndexedDb()) {
-    return;
-  }
-
-  await runStoreTransaction("readwrite", (store) => store.delete(ownerKey));
 }

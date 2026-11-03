@@ -1,21 +1,18 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   AlertCircle,
   BriefcaseBusiness,
   CheckCircle2,
-  ChevronDown,
   FilePenLine,
+  FileText,
   GitBranch,
   LoaderCircle,
-  LogOut,
+  Pencil,
   Play,
-  Shield,
   Upload,
-  User,
-  X,
 } from "lucide-react";
 
 import {
@@ -34,13 +31,11 @@ import {
   tryReconstructReviewRunResult,
   type LocalReviewRunSnapshot,
 } from "@/lib/review/local-run-cache";
+import { REVIEW_STAGE_ORDER as STAGE_ORDER, createInitialStageStatus } from "@/lib/review/stages";
 import {
-  EMPTY_STAGE_LIVE_STATE,
   STAGE_META,
-  STAGE_ORDER,
   createEmptyStageLiveState,
   formatPhaseLabel,
-  formatWorkflowStatus,
   isRecord,
   isStageName,
   type StageLiveState,
@@ -49,6 +44,10 @@ import {
   type StageStatus,
 } from "@/components/review-studio-shared";
 import { PdfAgentWorkbench } from "@/components/pdf-agent-workbench";
+import { WorkflowTimeline } from "@/components/workflow-timeline";
+import { LlmConfigMenu } from "@/components/llm-config-menu";
+import { appendLlmConfigToFormData } from "@/lib/llm/config";
+import { readRequiredLlmConfig } from "@/lib/llm/storage";
 
 // Result panels (incl. html2pdf export + heavy lucide icons) are only needed
 // once a stage-detail drawer is opened, so load them in a separate chunk.
@@ -56,61 +55,8 @@ const StageDetailDrawer = dynamic(() => import("@/components/review-stage-detail
   ssr: false,
 });
 
-export type ReviewIdentity =
-  | {
-    kind: "user";
-    user: {
-      id: string;
-      username: string;
-      role: "ADMIN" | "MEMBER";
-      status: "ACTIVE" | "BLOCKED";
-    };
-  }
-  | {
-    kind: "guest";
-    guest: {
-      id: string;
-      status: "ACTIVE" | "BLOCKED";
-      trialUsedCount: number;
-      maxTrialCount: number;
-      remainingTrialCount: number;
-    };
-  };
-
-function createInitialStageStatus(): Record<StageName, StageStatus> {
-  return {
-    resume_loader: "pending",
-    resume_parser: "pending",
-    hr_agent: "pending",
-    interviewer_agent: "pending",
-    career_master_agent: "pending",
-    summary_agent: "pending",
-    rewrite_agent: "pending",
-  };
-}
-
-function isStageReadyToRun(stage: StageName, stagePayloads: Partial<Record<StageName, unknown>>): boolean {
-  if (stage === "resume_loader") {
-    return true;
-  }
-  if (stage === "resume_parser") {
-    return Boolean(stagePayloads.resume_loader);
-  }
-  const parallelReviewers: StageName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
-  if (parallelReviewers.includes(stage)) {
-    return Boolean(stagePayloads.resume_parser);
-  }
-  if (stage === "summary_agent") {
-    return Boolean(
-      stagePayloads.hr_agent &&
-      stagePayloads.interviewer_agent &&
-      stagePayloads.career_master_agent
-    );
-  }
-  if (stage === "rewrite_agent") {
-    return Boolean(stagePayloads.summary_agent);
-  }
-  return false;
+function formatFileSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function getStagesToReset(startStage: StageName): StageName[] {
@@ -119,7 +65,7 @@ function getStagesToReset(startStage: StageName): StageName[] {
   if (startStage === "resume_loader") {
     return [...STAGE_ORDER];
   } else if (startStage === "resume_parser") {
-    return STAGE_ORDER.slice(1) as unknown as StageName[];
+    return STAGE_ORDER.slice(1);
   } else if (parallelReviewers.includes(startStage)) {
     return [startStage, "summary_agent", "rewrite_agent"];
   } else if (startStage === "summary_agent") {
@@ -132,16 +78,6 @@ function getStagesToReset(startStage: StageName): StageName[] {
 
 function createReviewRunId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `local-run-${Date.now()}`;
-}
-
-function getReviewOwnerKey(identity?: ReviewIdentity): string {
-  if (identity?.kind === "user") {
-    return `user:${identity.user.id}`;
-  }
-  if (identity?.kind === "guest") {
-    return `guest:${identity.guest.id}`;
-  }
-  return "anonymous";
 }
 
 function firstActiveStage(stageStatus: Record<StageName, StageStatus>): StageName {
@@ -233,888 +169,7 @@ function parseChunkLine(line: string) {
   return reviewStreamChunkSchema.parse(JSON.parse(line));
 }
 
-const FlowRunnerPath = memo(function FlowRunnerPath({
-  path,
-  lineClass,
-  duration = "2.4s",
-  delay = "0s",
-}: {
-  path: string;
-  lineClass: string;
-  duration?: string;
-  delay?: string;
-}) {
-  const runnerClass =
-    lineClass === "flow-line-done"
-      ? "flow-line-runner flow-line-runner-done"
-      : lineClass === "flow-line-active"
-        ? "flow-line-runner flow-line-runner-active"
-        : lineClass === "flow-line-ready"
-          ? "flow-line-runner flow-line-runner-ready"
-          : "flow-line-runner";
-
-  return (
-    <path
-      d={path}
-      className={`${lineClass} ${runnerClass}`}
-      fill="none"
-      vectorEffect="non-scaling-stroke"
-      style={{ animationDelay: delay, animationDuration: duration }}
-    />
-  );
-});
-
-const WorkflowDownArrow = memo(function WorkflowDownArrow({
-  isDone,
-  isRunning,
-  isReady,
-}: {
-  isDone: boolean;
-  isRunning: boolean;
-  isReady: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [ports, setPorts] = useState({ fromX: -14, fromY: 278, toX: 100, toY: 160 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () => {
-      const parent = el.closest('.workflow-flowchart');
-      if (!parent) return;
-      const loaderCard = parent.querySelector('.workflow-node-resume_loader');
-      const parserCard = parent.querySelector('.workflow-node-resume_parser');
-      const rect = parent.getBoundingClientRect();
-      if (loaderCard && parserCard && rect.width > 0) {
-        const lRect = loaderCard.getBoundingClientRect();
-        const pRect = parserCard.getBoundingClientRect();
-        setPorts({
-          fromX: lRect.right - rect.left,
-          fromY: (lRect.top + lRect.height / 2) - rect.top,
-          toX: pRect.left - rect.left,
-          toY: (pRect.top + pRect.height / 2) - rect.top,
-        });
-      }
-    };
-
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    const flowParent = el.closest('.workflow-flowchart');
-    if (flowParent) {
-      ro.observe(flowParent);
-      const loader = flowParent.querySelector('.workflow-node-resume_loader');
-      if (loader) ro.observe(loader);
-      const parser = flowParent.querySelector('.workflow-node-resume_parser');
-      if (parser) ro.observe(parser);
-    }
-    update();
-    return () => ro.disconnect();
-  }, []);
-
-  const lineClass = isDone ? "flow-line-done" : isRunning ? "flow-line-active" : isReady ? "flow-line-ready" : "flow-line-idle";
-
-  const fx = ports.fromX;
-  const fy = ports.fromY;
-  const tx = ports.toX;
-  const ty = ports.toY;
-  const cx = (fx + tx) / 2; // center X for vertical segment
-  const r = 12;
-  const path = Math.abs(fy - ty) < 4
-    ? `M ${fx} ${fy} H ${tx}`
-    : `M ${fx} ${fy} H ${cx - r} Q ${cx} ${fy} ${cx} ${fy > ty ? fy - r : fy + r} V ${fy > ty ? ty + r : ty - r} Q ${cx} ${ty} ${cx + r} ${ty} H ${tx}`;
-
-  const arrowColor =
-    isDone ? "var(--green)" : (isRunning || isReady) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
-
-  return (
-    <div className="flowchart-arrow-container" ref={containerRef}>
-      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
-        <path d={path} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={path} className={lineClass} fill="none" />
-        <FlowRunnerPath path={path} lineClass={lineClass} duration="1.45s" />
-        <path
-          d={`M ${tx - 6} ${ty - 5} L ${tx} ${ty} L ${tx - 6} ${ty + 5}`}
-          stroke={arrowColor}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
-    </div>
-  );
-});
-
-const WorkflowVerticalArrow = memo(function WorkflowVerticalArrow({
-  isDone,
-  isRunning,
-  isReady,
-}: {
-  isDone: boolean;
-  isRunning: boolean;
-  isReady: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [ports, setPorts] = useState({ cx: 24, fromY: -8, toY: 58 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () => {
-      const flowParent = el.closest('.workflow-flowchart');
-      const wrapper = el.parentElement;
-      const fromSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
-        ? '.workflow-node-summary_agent'
-        : '.workflow-input-node';
-      const toSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
-        ? '.workflow-node-rewrite_agent'
-        : '.workflow-node-resume_loader';
-      const prev = flowParent?.querySelector(fromSelector);
-      const next = flowParent?.querySelector(toSelector);
-      const rect = flowParent?.getBoundingClientRect();
-      if (prev && next && rect && rect.height > 0) {
-        const prevRect = prev.getBoundingClientRect();
-        const nextRect = next.getBoundingClientRect();
-        setPorts({
-          cx: (nextRect.left + nextRect.width / 2) - rect.left,
-          fromY: prevRect.bottom - rect.top,
-          toY: nextRect.top - rect.top,
-        });
-      }
-    };
-
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    const flowParent = el.closest('.workflow-flowchart');
-    const wrapper = el.parentElement;
-    if (flowParent) {
-      ro.observe(flowParent);
-      const fromSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
-        ? '.workflow-node-summary_agent'
-        : '.workflow-input-node';
-      const toSelector = wrapper?.classList.contains('workflow-vertical-arrow-right')
-        ? '.workflow-node-rewrite_agent'
-        : '.workflow-node-resume_loader';
-      const prev = flowParent.querySelector(fromSelector);
-      const next = flowParent.querySelector(toSelector);
-      if (prev) ro.observe(prev);
-      if (next) ro.observe(next);
-    }
-    update();
-    return () => ro.disconnect();
-  }, []);
-
-  const lineClass = isDone ? "flow-line-done" : isRunning ? "flow-line-active" : isReady ? "flow-line-ready" : "flow-line-idle";
-  const arrowColor = isDone ? "var(--green)" : (isRunning || isReady) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
-  const { cx, fromY, toY } = ports;
-  const path = `M ${cx} ${fromY} V ${toY}`;
-
-  return (
-    <div className="flowchart-vertical-arrow-container" ref={containerRef}>
-      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
-        <defs>
-          <marker id="arrow-down-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M 2 2 L 6 5 L 2 8" stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </marker>
-          <marker id="arrow-down-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M 2 2 L 6 5 L 2 8" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </marker>
-          <marker id="arrow-down-gray" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M 2 2 L 6 5 L 2 8" stroke="rgba(0, 242, 254, 0.38)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </marker>
-        </defs>
-        <path d={path} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" />
-        <path d={path} className={lineClass} markerEnd={isDone ? "url(#arrow-down-green)" : (isRunning || isReady) ? "url(#arrow-down-cyan)" : "url(#arrow-down-gray)"} />
-        <FlowRunnerPath path={path} lineClass={lineClass} duration="1.45s" />
-      </svg>
-    </div>
-  );
-});
-
-
-const WorkflowBranchConnector = memo(function WorkflowBranchConnector({
-  isParserDone,
-  hrStatus,
-  interviewerStatus,
-  careerStatus,
-}: {
-  isParserDone: boolean;
-  hrStatus: StageStatus;
-  interviewerStatus: StageStatus;
-  careerStatus: StageStatus;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [ports, setPorts] = useState({ fromX: -14, fromY: 160, toX: 100, topY: 42, midY: 160, bottomY: 278 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () => {
-      const parent = el.closest('.workflow-flowchart');
-      if (!parent) return;
-      const parserCard = parent.querySelector('.workflow-node-resume_parser');
-      const hrCard = parent.querySelector('.workflow-node-hr_agent');
-      const interviewerCard = parent.querySelector('.workflow-node-interviewer_agent');
-      const careerCard = parent.querySelector('.workflow-node-career_master_agent');
-      const rect = parent.getBoundingClientRect();
-      if (parserCard && hrCard && interviewerCard && careerCard && rect.width > 0) {
-        const pRect = parserCard.getBoundingClientRect();
-        const hRect = hrCard.getBoundingClientRect();
-        const iRect = interviewerCard.getBoundingClientRect();
-        const cRect = careerCard.getBoundingClientRect();
-        setPorts({
-          fromX: pRect.right - rect.left,
-          fromY: (pRect.top + pRect.height / 2) - rect.top,
-          toX: Math.min(hRect.left, iRect.left, cRect.left) - rect.left,
-          topY: (hRect.top + hRect.height / 2) - rect.top,
-          midY: (iRect.top + iRect.height / 2) - rect.top,
-          bottomY: (cRect.top + cRect.height / 2) - rect.top,
-        });
-      }
-    };
-
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    const flowParent = el.closest('.workflow-flowchart');
-    if (flowParent) {
-      ro.observe(flowParent);
-      for (const sel of ['.workflow-node-resume_parser', '.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent']) {
-        const n = flowParent.querySelector(sel);
-        if (n) ro.observe(n);
-      }
-    }
-    update();
-    return () => ro.disconnect();
-  }, []);
-
-  const readyClass = isParserDone ? "flow-line-ready" : "flow-line-idle";
-  const getBranchClass = (status: StageStatus) =>
-    status === "done" ? "flow-line-done" : status === "running" ? "flow-line-active" : readyClass;
-
-  const leftClass = getBranchClass(hrStatus);
-  const midClass = getBranchClass(interviewerStatus);
-  const rightClass = getBranchClass(careerStatus);
-
-  const allReviewersDone = hrStatus === "done" && interviewerStatus === "done" && careerStatus === "done";
-  const anyReviewerRunning = hrStatus === "running" || interviewerStatus === "running" || careerStatus === "running";
-  const trunkClass = allReviewersDone
-    ? "flow-line-done"
-    : anyReviewerRunning
-      ? "flow-line-active"
-      : isParserDone
-        ? "flow-line-ready"
-        : "flow-line-idle";
-
-  const fx = ports.fromX;
-  const fy = ports.fromY;
-  const tx = ports.toX;
-  const ty1 = ports.topY;
-  const ty2 = ports.midY;
-  const ty3 = ports.bottomY;
-  const cx = (fx + tx) / 2;
-  const r = 12;
-
-  const buildBranchPath = (ty: number) => {
-    if (Math.abs(ty - fy) < 8) {
-      return `M ${cx - r} ${fy} H ${tx}`;
-    }
-    const sign = ty < fy ? -1 : 1;
-    const startCornerY = fy + sign * r;
-    const endCornerY = ty - sign * r;
-    return `M ${cx - r} ${fy} Q ${cx} ${fy} ${cx} ${startCornerY} V ${endCornerY} Q ${cx} ${ty} ${cx + r} ${ty} H ${tx}`;
-  };
-
-  const pathTrunk = `M ${fx} ${fy} H ${cx - r}`;
-  const pathTop = buildBranchPath(ty1);
-  const pathMid = buildBranchPath(ty2);
-  const pathBottom = buildBranchPath(ty3);
-
-  const arrowColor = (status: StageStatus, ready: boolean) =>
-    status === "done" ? "var(--green)" : (status === "running" || ready) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
-
-  const chevron = (y: number, color: string) => (
-    <path d={`M ${tx - 6} ${y - 5} L ${tx} ${y} L ${tx - 6} ${y + 5}`} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-  );
-
-  return (
-    <div className="flowchart-branch-container" ref={containerRef}>
-      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
-        <path d={pathTrunk} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathTop} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathMid} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathBottom} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-
-        <path d={pathTrunk} className={trunkClass} fill="none" />
-        <path d={pathTop} className={leftClass} fill="none" />
-        <path d={pathMid} className={midClass} fill="none" />
-        <path d={pathBottom} className={rightClass} fill="none" />
-        <FlowRunnerPath path={pathTrunk} lineClass={trunkClass} duration="1.75s" />
-        <FlowRunnerPath path={pathTop} lineClass={leftClass} duration="2.15s" delay="-0.35s" />
-        <FlowRunnerPath path={pathMid} lineClass={midClass} duration="1.65s" delay="-0.1s" />
-        <FlowRunnerPath path={pathBottom} lineClass={rightClass} duration="2.15s" delay="-0.75s" />
-
-        {chevron(ty1, arrowColor(hrStatus, isParserDone))}
-        {chevron(ty2, arrowColor(interviewerStatus, isParserDone))}
-        {chevron(ty3, arrowColor(careerStatus, isParserDone))}
-      </svg>
-    </div>
-  );
-});
-
-const WorkflowMergeConnector = memo(function WorkflowMergeConnector({
-  hrStatus,
-  interviewerStatus,
-  careerStatus,
-  summaryStatus,
-}: {
-  hrStatus: StageStatus;
-  interviewerStatus: StageStatus;
-  careerStatus: StageStatus;
-  summaryStatus: StageStatus;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [ports, setPorts] = useState({ fromX: -14, topY: 42, midY: 160, bottomY: 278, toX: 100, toY: 42 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () => {
-      const parent = el.closest('.workflow-flowchart');
-      if (!parent) return;
-      const hrCard = parent.querySelector('.workflow-node-hr_agent');
-      const interviewerCard = parent.querySelector('.workflow-node-interviewer_agent');
-      const careerCard = parent.querySelector('.workflow-node-career_master_agent');
-      const summaryCard = parent.querySelector('.workflow-node-summary_agent');
-      const rect = parent.getBoundingClientRect();
-      if (hrCard && interviewerCard && careerCard && summaryCard && rect.width > 0) {
-        const hRect = hrCard.getBoundingClientRect();
-        const iRect = interviewerCard.getBoundingClientRect();
-        const cRect = careerCard.getBoundingClientRect();
-        const sRect = summaryCard.getBoundingClientRect();
-        setPorts({
-          fromX: Math.max(hRect.right, iRect.right, cRect.right) - rect.left,
-          topY: (hRect.top + hRect.height / 2) - rect.top,
-          midY: (iRect.top + iRect.height / 2) - rect.top,
-          bottomY: (cRect.top + cRect.height / 2) - rect.top,
-          toX: sRect.left - rect.left,
-          toY: (sRect.top + sRect.height / 2) - rect.top,
-        });
-      }
-    };
-
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    const flowParent = el.closest('.workflow-flowchart');
-    if (flowParent) {
-      ro.observe(flowParent);
-      for (const sel of ['.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent', '.workflow-node-summary_agent']) {
-        const n = flowParent.querySelector(sel);
-        if (n) ro.observe(n);
-      }
-    }
-    update();
-    return () => ro.disconnect();
-  }, []);
-
-  const allReviewersDone = hrStatus === "done" && interviewerStatus === "done" && careerStatus === "done";
-  const readyToSummarize = allReviewersDone && summaryStatus === "pending";
-  const pendingClass = readyToSummarize ? "flow-line-ready" : "flow-line-idle";
-  const getMergeClass = (status: StageStatus) =>
-    summaryStatus === "done"
-      ? "flow-line-done"
-      : summaryStatus === "running"
-        ? "flow-line-active"
-        : status === "done"
-          ? "flow-line-done"
-          : pendingClass;
-
-  const leftClass = getMergeClass(hrStatus);
-  const midClass = getMergeClass(interviewerStatus);
-  const rightClass = getMergeClass(careerStatus);
-
-  const trunkClass = summaryStatus === "done"
-    ? "flow-line-done"
-    : summaryStatus === "running"
-      ? "flow-line-active"
-      : allReviewersDone
-        ? "flow-line-ready"
-        : "flow-line-idle";
-
-  const fx = ports.fromX;
-  const tx = ports.toX;
-  const ty1 = ports.topY;
-  const ty2 = ports.midY;
-  const ty3 = ports.bottomY;
-  const toY = ports.toY;
-  const cx = (fx + tx) / 2;
-  const r = 12;
-
-  const buildBranchPath = (ty: number) => {
-    if (Math.abs(ty - toY) < 8) {
-      return `M ${fx} ${ty} H ${cx + r}`;
-    }
-    const sign = ty > toY ? -1 : 1;
-    const startCornerY = ty + sign * r;
-    const endCornerY = toY - sign * r;
-    return `M ${fx} ${ty} H ${cx - r} Q ${cx} ${ty} ${cx} ${startCornerY} V ${endCornerY} Q ${cx} ${toY} ${cx + r} ${toY}`;
-  };
-
-  const pathTop = buildBranchPath(ty1);
-  const pathMid = buildBranchPath(ty2);
-  const pathBottom = buildBranchPath(ty3);
-  const pathTrunk = `M ${cx + r} ${toY} H ${tx}`;
-
-  const arrowColor =
-    summaryStatus === "done" ? "var(--green)" : (summaryStatus === "running" || allReviewersDone) ? "var(--cyan)" : "rgba(0, 242, 254, 0.38)";
-
-  return (
-    <div className="flowchart-merge-container" ref={containerRef}>
-      <svg width="100%" height="100%" fill="none" style={{ overflow: "visible" }}>
-        <path d={pathTop} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathMid} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathBottom} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-        <path d={pathTrunk} stroke="rgba(255, 255, 255, 0.04)" strokeWidth="1.5" fill="none" />
-
-        <path d={pathTop} className={leftClass} fill="none" />
-        <path d={pathMid} className={midClass} fill="none" />
-        <path d={pathBottom} className={rightClass} fill="none" />
-        <path d={pathTrunk} className={trunkClass} fill="none" />
-        <FlowRunnerPath path={pathTop} lineClass={leftClass} duration="2.15s" delay="-0.2s" />
-        <FlowRunnerPath path={pathMid} lineClass={midClass} duration="1.65s" delay="-0.55s" />
-        <FlowRunnerPath path={pathBottom} lineClass={rightClass} duration="2.15s" delay="-0.9s" />
-        <FlowRunnerPath path={pathTrunk} lineClass={trunkClass} duration="1.75s" />
-
-        <path
-          d={`M ${tx - 6} ${toY - 5} L ${tx} ${toY} L ${tx - 6} ${toY + 5}`}
-          stroke={arrowColor}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
-    </div>
-  );
-});
-
-const StageWorkflowCard = memo(function StageWorkflowCard({
-  stage,
-  index,
-  isSelected,
-  hasResult,
-  status,
-  liveState,
-  onOpenStageDetails,
-  onStartStage,
-  onInterrupt,
-  isRunningAny,
-  isReady,
-}: {
-  stage: StageName;
-  index: number;
-  isSelected: boolean;
-  hasResult: boolean;
-  status: StageStatus;
-  liveState: StageLiveState;
-  onOpenStageDetails: (stage: StageName) => void;
-  onStartStage: (stage: StageName) => void;
-  onInterrupt: () => void;
-  isRunningAny: boolean;
-  isReady: boolean;
-}) {
-  const meta = STAGE_META[stage];
-  const statusLabel = formatWorkflowStatus(status, liveState.phase);
-
-  return (
-    <div
-      className={`workflow-node-card workflow-node-${stage} workflow-node-${status} ${isSelected ? "is-selected" : ""} ${hasResult ? "has-result" : ""}`}
-      onClick={() => onOpenStageDetails(stage)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpenStageDetails(stage);
-        }
-      }}
-      aria-label={`打开 ${meta.label} 节点详情，当前状态：${statusLabel}`}
-      aria-pressed={isSelected}
-    >
-      <span className="workflow-node-content">
-        <span className="workflow-node-kicker">STEP 0{index + 1}</span>
-        <strong>{meta.label}</strong>
-        <span className="workflow-node-status-text">
-          {liveState.latestMessage || meta.focus}
-        </span>
-      </span>
-      <StageStatusIndicator
-        stage={stage}
-        status={status}
-        label={statusLabel}
-        onStartStage={onStartStage}
-        onInterrupt={onInterrupt}
-        isRunningAny={isRunningAny}
-        isReady={isReady}
-      />
-    </div>
-  );
-});
-
-function StageStatusIndicator({
-  stage,
-  status,
-  label,
-  onStartStage,
-  onInterrupt,
-  isRunningAny,
-  isReady,
-}: {
-  stage: StageName;
-  status: StageStatus;
-  label: string;
-  onStartStage: (stage: StageName) => void;
-  onInterrupt: () => void;
-  isRunningAny: boolean;
-  isReady: boolean;
-}) {
-  if (status === "running") {
-    return (
-      <button
-        className="workflow-node-status-indicator workflow-node-status-indicator-running interactive-status-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          onInterrupt();
-        }}
-        aria-label="中断诊断"
-        title="点击中断诊断"
-        type="button"
-      >
-        <span className="indicator-running-container">
-          <LoaderCircle className="spin-icon default-icon" size={15} aria-hidden="true" />
-          <X className="stop-icon" size={15} aria-hidden="true" />
-        </span>
-      </button>
-    );
-  }
-
-  // If the pipeline is not running and this stage is ready to be run, show Play icon on hover
-  if (!isRunningAny && isReady) {
-    const playTooltip = status === "pending" ? "启动该阶段诊断" : "重新启动该阶段诊断";
-    return (
-      <button
-        className={`workflow-node-status-indicator workflow-node-status-indicator-${status} interactive-status-btn`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onStartStage(stage);
-        }}
-        aria-label={playTooltip}
-        title={playTooltip}
-        type="button"
-      >
-        <span className="indicator-play-container">
-          <span className="default-icon flex items-center justify-center">
-            {status === "done" && <CheckCircle2 size={15} aria-hidden="true" />}
-            {(status === "interrupted" || status === "failed") && <AlertCircle size={15} aria-hidden="true" />}
-            {status === "pending" && <span className="workflow-status-dot" aria-hidden="true" />}
-          </span>
-          <Play className="play-icon" size={11} fill="currentColor" aria-hidden="true" />
-        </span>
-      </button>
-    );
-  }
-
-  if (status === "done") {
-    return (
-      <span
-        className="workflow-node-status-indicator workflow-node-status-indicator-done"
-        aria-label={label}
-        title={label}
-      >
-        <CheckCircle2 size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (status === "interrupted" || status === "failed") {
-    return (
-      <span
-        className={`workflow-node-status-indicator workflow-node-status-indicator-${status}`}
-        aria-label={label}
-        title={label}
-      >
-        <AlertCircle size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className="workflow-node-status-indicator workflow-node-status-indicator-pending"
-      aria-label={label}
-      title={label}
-    >
-      <span className="workflow-status-dot" aria-hidden="true" />
-    </span>
-  );
-}
-
-function FutureAgentSkeleton() {
-  return (
-    <article className="workflow-node-card future-agent-card" aria-label="预留 Agent 节点">
-      <span className="workflow-node-content">
-        <span className="workflow-node-kicker">STEP 07</span>
-        <strong>Future Agent</strong>
-        <span className="workflow-node-status-text">预留扩展节点，等待接入下一位 Agent</span>
-      </span>
-      <span
-        className="workflow-node-status-indicator workflow-node-status-indicator-future"
-        aria-label="预留骨架"
-        title="预留骨架"
-      >
-        <span className="workflow-status-dot" aria-hidden="true" />
-      </span>
-    </article>
-  );
-}
-
-type WorkflowTimelineProps = {
-  setupNode: ReactNode;
-  isInputReady: boolean;
-  selectedStage: StageName;
-  stagePayloads: Partial<Record<StageName, unknown>>;
-  stageStatus: Record<StageName, StageStatus>;
-  stageStreams: Partial<Record<StageName, StageLiveState>>;
-  onOpenStageDetails: (stage: StageName) => void;
-  onStartStage: (stage: StageName) => void;
-  onInterrupt: () => void;
-  isRunningAny: boolean;
-};
-
-const WorkflowTimeline = memo(function WorkflowTimeline({
-  setupNode,
-  isInputReady,
-  selectedStage,
-  stagePayloads,
-  stageStatus,
-  stageStreams,
-  onOpenStageDetails,
-  onStartStage,
-  onInterrupt,
-  isRunningAny,
-}: WorkflowTimelineProps) {
-  const getLiveState = (stage: StageName) => stageStreams[stage] ?? EMPTY_STAGE_LIVE_STATE;
-  const getStatus = (stage: StageName) => stageStatus[stage];
-  const hasResult = (stage: StageName) => Boolean(stagePayloads[stage]);
-  const isReady = (stage: StageName) => isStageReadyToRun(stage, stagePayloads);
-
-  return (
-    <div className="workflow-flowchart" aria-label="Resume review workflow flowchart">
-      {/* 1. Setup Node (Input Card) - Spans col 1-3 */}
-      <div className="workflow-setup-container workflow-entry-column">
-        {setupNode}
-      </div>
-
-      {/* Vertical arrow from Input to Loader */}
-      <div className="workflow-vertical-arrow-left">
-        <WorkflowVerticalArrow
-          isDone={getStatus("resume_loader") === "done"}
-          isRunning={getStatus("resume_loader") === "running"}
-          isReady={isInputReady}
-        />
-      </div>
-
-      {/* 2. Resume Loader (bottom row, col 1) */}
-      <div className="workflow-loader-container">
-        <StageWorkflowCard
-          stage="resume_loader"
-          index={1}
-          isSelected={selectedStage === "resume_loader"}
-          hasResult={hasResult("resume_loader")}
-          status={getStatus("resume_loader")}
-          liveState={getLiveState("resume_loader")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("resume_loader")}
-        />
-      </div>
-
-      {/* Horizontal connector Loader -> Parser */}
-      <div className="workflow-down-arrow-container">
-        <WorkflowDownArrow
-          isDone={getStatus("resume_parser") === "done"}
-          isRunning={getStatus("resume_parser") === "running"}
-          isReady={getStatus("resume_loader") === "done"}
-        />
-      </div>
-
-      {/* 3. Resume Parser (bottom row, col 3) */}
-      <div className="workflow-parser-container">
-        <StageWorkflowCard
-          stage="resume_parser"
-          index={2}
-          isSelected={selectedStage === "resume_parser"}
-          hasResult={hasResult("resume_parser")}
-          status={getStatus("resume_parser")}
-          liveState={getLiveState("resume_parser")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("resume_parser")}
-        />
-      </div>
-
-      {/* Branch Parser -> Parallel Reviewer Agent */}
-      <div className="workflow-branch-container">
-        <WorkflowBranchConnector
-          isParserDone={getStatus("resume_parser") === "done"}
-          hrStatus={getStatus("hr_agent")}
-          interviewerStatus={getStatus("interviewer_agent")}
-          careerStatus={getStatus("career_master_agent")}
-        />
-      </div>
-
-      {/* 4. Three Parallel Reviewers */}
-      <div className="workflow-reviewer-row">
-        <StageWorkflowCard
-          stage="hr_agent"
-          index={3}
-          isSelected={selectedStage === "hr_agent"}
-          hasResult={hasResult("hr_agent")}
-          status={getStatus("hr_agent")}
-          liveState={getLiveState("hr_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("hr_agent")}
-        />
-        <StageWorkflowCard
-          stage="interviewer_agent"
-          index={4}
-          isSelected={selectedStage === "interviewer_agent"}
-          hasResult={hasResult("interviewer_agent")}
-          status={getStatus("interviewer_agent")}
-          liveState={getLiveState("interviewer_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("interviewer_agent")}
-        />
-        <StageWorkflowCard
-          stage="career_master_agent"
-          index={5}
-          isSelected={selectedStage === "career_master_agent"}
-          hasResult={hasResult("career_master_agent")}
-          status={getStatus("career_master_agent")}
-          liveState={getLiveState("career_master_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("career_master_agent")}
-        />
-      </div>
-
-      {/* Merge Reviewer Agents -> Summary Agent */}
-      <div className="workflow-merge-container">
-        <WorkflowMergeConnector
-          hrStatus={getStatus("hr_agent")}
-          interviewerStatus={getStatus("interviewer_agent")}
-          careerStatus={getStatus("career_master_agent")}
-          summaryStatus={getStatus("summary_agent")}
-        />
-      </div>
-
-      {/* 5. Summary Agent */}
-      <div className="workflow-summary-container">
-        <StageWorkflowCard
-          stage="summary_agent"
-          index={6}
-          isSelected={selectedStage === "summary_agent"}
-          hasResult={hasResult("summary_agent")}
-          status={getStatus("summary_agent")}
-          liveState={getLiveState("summary_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("summary_agent")}
-        />
-      </div>
-
-      {/* Vertical arrow from Summary to Rewrite */}
-      <div className="workflow-vertical-arrow-right">
-        <WorkflowVerticalArrow
-          isDone={getStatus("rewrite_agent") === "done"}
-          isRunning={getStatus("rewrite_agent") === "running"}
-          isReady={getStatus("summary_agent") === "done"}
-        />
-      </div>
-
-      {/* 6. Resume Rewrite */}
-      <div className="workflow-rewrite-container workflow-output-column">
-        <StageWorkflowCard
-          stage="rewrite_agent"
-          index={7}
-          isSelected={selectedStage === "rewrite_agent"}
-          hasResult={hasResult("rewrite_agent")}
-          status={getStatus("rewrite_agent")}
-          liveState={getLiveState("rewrite_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("rewrite_agent")}
-        />
-      </div>
-    </div>
-  );
-}, areWorkflowTimelinePropsEqual);
-
-function areWorkflowTimelinePropsEqual(previous: WorkflowTimelineProps, next: WorkflowTimelineProps) {
-  if (previous.setupNode !== next.setupNode || previous.isInputReady !== next.isInputReady) {
-    return false;
-  }
-  if (previous.selectedStage !== next.selectedStage) {
-    return false;
-  }
-  if (previous.onOpenStageDetails !== next.onOpenStageDetails) {
-    return false;
-  }
-  if (previous.onStartStage !== next.onStartStage) {
-    return false;
-  }
-  if (previous.onInterrupt !== next.onInterrupt) {
-    return false;
-  }
-  if (previous.isRunningAny !== next.isRunningAny) {
-    return false;
-  }
-
-  return STAGE_ORDER.every((stage) => {
-    const previousStream = previous.stageStreams[stage];
-    const nextStream = next.stageStreams[stage];
-
-    return (
-      previous.stageStatus[stage] === next.stageStatus[stage] &&
-      Boolean(previous.stagePayloads[stage]) === Boolean(next.stagePayloads[stage]) &&
-      (previousStream?.phase ?? null) === (nextStream?.phase ?? null) &&
-      (previousStream?.latestMessage ?? "") === (nextStream?.latestMessage ?? "")
-    );
-  });
-}
-
-export function ReviewStudio({
-  identity,
-  onSessionChanged,
-}: {
-  identity?: ReviewIdentity;
-  onSessionChanged?: () => void;
-}) {
+export function ReviewStudio() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [cachedResumeFileName, setCachedResumeFileName] = useState("");
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
@@ -1123,6 +178,7 @@ export function ReviewStudio({
   const [targetRoleDraft, setTargetRoleDraft] = useState("");
   const [targetDescriptionDraft, setTargetDescriptionDraft] = useState("");
   const [isTargetJobOpen, setIsTargetJobOpen] = useState(false);
+  const [inputError, setInputError] = useState<"resume" | "target" | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [runningStages, setRunningStages] = useState<StageName[]>([]);
@@ -1134,54 +190,25 @@ export function ReviewStudio({
   const [selectedStage, setSelectedStage] = useState<StageName>("resume_loader");
   const [detailsStage, setDetailsStage] = useState<StageName | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<"workflow" | "agent">("workflow");
-  const [isIdentityMenuOpen, setIsIdentityMenuOpen] = useState(false);
-  const floatingMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        floatingMenuRef.current &&
-        !floatingMenuRef.current.contains(event.target as Node)
-      ) {
-        setIsIdentityMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const phaseTimelineRef = useRef<Partial<Record<StageName, ReviewStageProgressPhase>>>({});
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const runningStagesRef = useRef<StageName[]>([]);
   const selectedStageRef = useRef<StageName>("resume_loader");
-  const ownerKey = getReviewOwnerKey(identity);
-  const isGuest = identity?.kind === "guest";
-  const guestRemainingTrialCount = isGuest ? identity.guest.remainingTrialCount : 0;
-  const isBlocked =
-    identity?.kind === "user"
-      ? identity.user.status !== "ACTIVE"
-      : identity?.kind === "guest"
-        ? identity.guest.status !== "ACTIVE"
-        : true;
-  const identityLabel =
-    identity?.kind === "user"
-      ? `${identity.user.username} · ${identity.user.role === "ADMIN" ? "管理员" : "正式成员"}`
-      : identity?.kind === "guest"
-        ? `游客试用 · 剩余 ${guestRemainingTrialCount} 次`
-        : "未登录";
   const hasLocalCheckpoint = hasReusableReviewState(stagePayloads);
   const canResumeLocalRun = Boolean(currentRunId && hasLocalCheckpoint && !finalResult && !resumeFile);
-  const canRunReview =
-    !!identity &&
-    !isBlocked &&
-    (identity.kind === "user" || identity.guest.remainingTrialCount > 0 || canResumeLocalRun);
-  const uploadLabel = resumeFile
-    ? resumeFile.name
+  const uploadLabel = resumeFile ? resumeFile.name : cachedResumeFileName || "点击选择简历文件";
+  const uploadHint = resumeFile
+    ? `${formatFileSize(resumeFile.size)} · 点击更换`
     : cachedResumeFileName
-      ? `${cachedResumeFileName} (本地断点)`
-      : "选择简历源文件";
+      ? "本地断点 · 可直接继续"
+      : "PDF / DOCX / MD / TXT";
+  const targetJobHint = !targetRole
+    ? "必填 · 评分以此为基准"
+    : targetDescription.trim()
+      ? `已附 JD · ${targetDescription.trim().length} 字`
+      : "未附 JD · 按岗位名称推断";
   const primaryActionLabel = isRunning ? "评审进行中..." : canResumeLocalRun ? "继续评审" : "启动评审";
   const isInputReady = Boolean((resumeFile || cachedResumeFileName || canResumeLocalRun) && targetRole);
 
@@ -1196,7 +223,7 @@ export function ReviewStudio({
   useEffect(() => {
     let cancelled = false;
 
-    void loadLocalReviewRun(ownerKey)
+    void loadLocalReviewRun()
       .then((snapshot) => {
         if (cancelled) {
           return;
@@ -1214,9 +241,7 @@ export function ReviewStudio({
           return;
         }
 
-        const restoredStatus = interruptRunningStages(
-          snapshot.stageStatus as Record<StageName, StageStatus>,
-        ) as Record<StageName, StageStatus>;
+        const restoredStatus = interruptRunningStages(snapshot.stageStatus);
 
         setCurrentRunId(snapshot.runId);
         setCachedResumeFileName(snapshot.resumeFileName);
@@ -1252,7 +277,7 @@ export function ReviewStudio({
     return () => {
       cancelled = true;
     };
-  }, [ownerKey]);
+  }, []);
 
   useEffect(() => {
     if (!currentRunId) {
@@ -1261,7 +286,6 @@ export function ReviewStudio({
 
     const saveTimer = window.setTimeout(() => {
       const snapshot: LocalReviewRunSnapshot = {
-        ownerKey,
         runId: currentRunId,
         resumeFileName: resumeFile?.name || cachedResumeFileName || "cached-resume.txt",
         targetRole,
@@ -1281,7 +305,6 @@ export function ReviewStudio({
     cachedResumeFileName,
     currentRunId,
     finalResult,
-    ownerKey,
     resumeFile?.name,
     stagePayloads,
     stageStatus,
@@ -1289,11 +312,6 @@ export function ReviewStudio({
     targetDescription,
     targetRole,
   ]);
-
-  const handleLogout = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    onSessionChanged?.();
-  }, [onSessionChanged]);
 
   const flushPendingProgressEvents = useCallback(() => {
     if (progressFlushTimerRef.current) {
@@ -1377,13 +395,14 @@ export function ReviewStudio({
   const handleSaveTargetJob = useCallback(() => {
     const nextRole = targetRoleDraft.trim();
     if (!nextRole) {
-      setErrorMessage("请填写目标岗位名称后保存。");
+      setInputError("target");
       return;
     }
 
     setTargetRole(nextRole);
     setTargetDescription(targetDescriptionDraft.trim());
     setIsTargetJobOpen(false);
+    setInputError(null);
     setErrorMessage("");
   }, [targetDescriptionDraft, targetRoleDraft]);
 
@@ -1425,7 +444,7 @@ export function ReviewStudio({
           } else {
             setErrorMessage(errorMessage);
           }
-          setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
+          setStageStatus((previous) => failRunningStages(previous));
           setIsRunning(false);
           requestAbortControllerRef.current = null;
           continue;
@@ -1441,17 +460,15 @@ export function ReviewStudio({
           setSelectedStage("rewrite_agent");
           setIsRunning(false);
           requestAbortControllerRef.current = null;
-          onSessionChanged?.();
           continue;
         }
         receivedTerminalChunk = true;
         flushPendingProgressEvents();
         appendTerminalError(chunk.message);
-        setStageStatus((previous) => failRunningStages(previous) as Record<StageName, StageStatus>);
+        setStageStatus((previous) => failRunningStages(previous));
         setErrorMessage(chunk.message);
         setIsRunning(false);
         requestAbortControllerRef.current = null;
-        onSessionChanged?.();
       }
 
       if (done) {
@@ -1577,7 +594,7 @@ export function ReviewStudio({
     requestAbortControllerRef.current = null;
     flushPendingProgressEvents();
     setRunningStages([]);
-    setStageStatus((previous) => interruptRunningStages(previous) as Record<StageName, StageStatus>);
+    setStageStatus((previous) => interruptRunningStages(previous));
     setIsRunning(false);
     setErrorMessage("已中断诊断，可点击继续诊断从本地断点重试。");
   }, [flushPendingProgressEvents]);
@@ -1588,6 +605,12 @@ export function ReviewStudio({
     finalResult: ReviewRunResult | null;
     startStage: StageName;
   }) => {
+    const llmConfigCheck = readRequiredLlmConfig();
+    if (!llmConfigCheck.ok) {
+      setErrorMessage(llmConfigCheck.message);
+      return;
+    }
+
     const abortController = new AbortController();
     requestAbortControllerRef.current = abortController;
 
@@ -1616,6 +639,7 @@ export function ReviewStudio({
     }
     formData.append("targetRole", targetRole.trim());
     formData.append("targetDescription", targetDescription.trim());
+    appendLlmConfigToFormData(formData, llmConfigCheck.config);
     if (isResumingLocalRun) {
       formData.append("resumeState", JSON.stringify(buildReviewResumeState({ stagePayloads: opts.payloads, finalResult: opts.finalResult })));
     }
@@ -1657,7 +681,7 @@ export function ReviewStudio({
           : "Review request failed.";
       appendTerminalError(errorMessage);
       setStageStatus((previous) =>
-        (wasAborted ? interruptRunningStages(previous) : failRunningStages(previous)) as Record<StageName, StageStatus>,
+        wasAborted ? interruptRunningStages(previous) : failRunningStages(previous),
       );
       setRunningStages([]);
       setErrorMessage(errorMessage);
@@ -1677,8 +701,9 @@ export function ReviewStudio({
   const handleStartStage = useCallback(async (stage: StageName) => {
     if (isRunning) return;
 
-    if (!canRunReview) {
-      setErrorMessage(isGuest ? "游客试用次数已用完，请登录正式账号。" : "当前身份无权启动诊断。");
+    const llmConfigCheck = readRequiredLlmConfig();
+    if (!llmConfigCheck.ok) {
+      setErrorMessage(llmConfigCheck.message);
       return;
     }
     if (!targetRole.trim()) {
@@ -1719,7 +744,6 @@ export function ReviewStudio({
       startStage: stage,
     });
   }, [
-    canRunReview,
     targetRole,
     targetDescription,
     stagePayloads,
@@ -1727,28 +751,30 @@ export function ReviewStudio({
     stageStreams,
     finalResult,
     isRunning,
-    isGuest,
     executeReview
   ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!canRunReview) {
-      setErrorMessage(isGuest ? "游客试用次数已用完，请登录正式账号。" : "当前身份无权启动诊断。");
-      return;
-    }
     const isResumingLocalRun = !resumeFile && hasLocalCheckpoint;
 
     if (!resumeFile && !isResumingLocalRun) {
-      setErrorMessage("请先上传简历文件。");
+      setInputError("resume");
       return;
     }
     if (!targetRole.trim()) {
-      setErrorMessage("请先配置目标岗位。");
+      setInputError("target");
       setTargetRoleDraft(targetRole);
       setTargetDescriptionDraft(targetDescription);
       setIsTargetJobOpen(true);
+      return;
+    }
+    setInputError(null);
+
+    const llmConfigCheck = readRequiredLlmConfig();
+    if (!llmConfigCheck.ok) {
+      setErrorMessage(llmConfigCheck.message);
       return;
     }
 
@@ -1759,7 +785,7 @@ export function ReviewStudio({
 
     if (isResumingLocalRun) {
       startStage = firstActiveStage(stageStatus);
-      nextStatus = interruptRunningStages(stageStatus) as Record<StageName, StageStatus>;
+      nextStatus = interruptRunningStages(stageStatus);
       setSelectedStage(startStage);
     } else {
       nextPayloads = {};
@@ -1782,27 +808,35 @@ export function ReviewStudio({
     });
   }
 
+  const hasResumeSource = Boolean(resumeFile || cachedResumeFileName);
+  const isResumeMissing = inputError === "resume" && !hasResumeSource;
+  const isTargetMissing = inputError === "target" && !targetRole;
   const workflowSetupNode = (
     <div className="workflow-canvas-controls flowchart-step-row full-width-row">
+      <span className={`workflow-input-frame ${isInputReady ? "is-ready" : ""}`} aria-hidden="true">
+        <span className="workflow-input-frame-label">
+          INPUT
+          <i>{isInputReady ? "配置完成" : `${Number(hasResumeSource) + Number(Boolean(targetRole))}/2 已配置`}</i>
+        </span>
+      </span>
+
       <div
-        className={`workflow-setup-panel workflow-node-card workflow-input-node ${
-          isInputReady ? "workflow-node-done" : "is-selected"
-        }`}
+        className={`workflow-setup-panel workflow-node-card workflow-input-node workflow-resume-card ${
+          hasResumeSource ? "workflow-node-done" : "is-selected"
+        } ${isResumeMissing ? "is-invalid" : ""}`}
       >
         <div className="workflow-setup-header">
           <span className="workflow-node-content">
-            <span className="workflow-node-kicker">STEP 01</span>
-            <strong>Input</strong>
-            <span className="workflow-node-status-text">
-              {isInputReady ? "简历与目标岗位已就绪" : "上传简历并配置目标岗位"}
-            </span>
+            <span className="workflow-node-kicker">INPUT 01</span>
+            <strong>Resume</strong>
+            <span className="workflow-node-status-text">上传待诊断的简历</span>
           </span>
 
           <form className="workflow-start-panel" onSubmit={handleSubmit}>
             <button
               className="workflow-start-action"
               type="submit"
-              disabled={isRunning || !canRunReview}
+              disabled={isRunning}
               aria-label={primaryActionLabel}
               title={primaryActionLabel}
             >
@@ -1813,7 +847,7 @@ export function ReviewStudio({
         </div>
 
         <div className="workflow-setup-form">
-          <label className="compact-upload" title={uploadLabel}>
+          <label className={`compact-upload ${hasResumeSource ? "is-filled" : ""}`} title={uploadLabel}>
             <input
               type="file"
               accept=".txt,.md,.pdf,.docx"
@@ -1823,19 +857,41 @@ export function ReviewStudio({
                 if (nextFile) {
                   setCachedResumeFileName(nextFile.name);
                   setCurrentRunId(null);
+                  setInputError(null);
                   setErrorMessage("");
                 }
               }}
             />
-            <Upload size={17} />
-            <span>{uploadLabel}</span>
-            {Boolean(resumeFile || cachedResumeFileName) && (
+            <span className="setup-tile-icon">
+              {hasResumeSource ? <FileText size={16} /> : <Upload size={16} />}
+            </span>
+            <span className="setup-tile-text">
+              <span className="setup-tile-value">{uploadLabel}</span>
+              <span className="setup-tile-hint">{isResumeMissing ? "必填 · 尚未上传" : uploadHint}</span>
+            </span>
+            {hasResumeSource ? (
               <span className="target-job-icon-badge" title="已上传">
                 <CheckCircle2 size={10} />
               </span>
-            )}
+            ) : null}
           </label>
+        </div>
+      </div>
 
+      <div
+        className={`workflow-setup-panel workflow-node-card workflow-target-card ${
+          targetRole ? "workflow-node-done" : hasResumeSource ? "is-selected" : ""
+        } ${isTargetMissing ? "is-invalid" : ""}`}
+      >
+        <div className="workflow-setup-header">
+          <span className="workflow-node-content">
+            <span className="workflow-node-kicker">INPUT 02</span>
+            <strong>Target Job</strong>
+            <span className="workflow-node-status-text">填写目标岗位信息</span>
+          </span>
+        </div>
+
+        <div className="workflow-setup-form">
           <div className={`target-job-config ${isTargetJobOpen ? "is-open" : ""}`}>
             <button
               className={`target-job-trigger ${targetRole ? "is-configured" : ""}`}
@@ -1846,26 +902,48 @@ export function ReviewStudio({
               aria-haspopup="dialog"
               title={targetRole ? "目标岗位: 已配置" : "目标岗位: 未配置"}
             >
-              <BriefcaseBusiness size={16} />
-              <span className="target-job-label">{targetRole || "目标岗位"}</span>
+              <span className="setup-tile-icon">
+                <BriefcaseBusiness size={16} />
+              </span>
+              <span className="setup-tile-text">
+                <span className="target-job-label setup-tile-value">{targetRole || "填写目标岗位"}</span>
+                <span className="setup-tile-hint">{isTargetMissing ? "必填 · 尚未填写" : targetJobHint}</span>
+              </span>
               {targetRole ? (
                 <span className="target-job-icon-badge" title="已配置">
                   <CheckCircle2 size={10} />
                 </span>
-              ) : null}
+              ) : (
+                <Pencil className="setup-tile-action" size={13} />
+              )}
             </button>
 
             {isTargetJobOpen ? (
               <div className="target-job-popover" role="dialog" aria-label="目标岗位配置">
-                <label className="target-job-popover-field">
-                  <span>岗位名称</span>
+                <label className={`target-job-popover-field ${isTargetMissing ? "is-invalid" : ""}`}>
+                  <span>
+                    岗位名称 <em className="target-job-required">*</em>
+                  </span>
                   <input
                     type="text"
                     value={targetRoleDraft}
-                    onChange={(event) => setTargetRoleDraft(event.currentTarget.value)}
+                    onChange={(event) => {
+                      setTargetRoleDraft(event.currentTarget.value);
+                      if (event.currentTarget.value.trim()) {
+                        setInputError(null);
+                      }
+                    }}
                     placeholder="例如：AI Agent 平台工程师"
                     disabled={isRunning}
+                    aria-invalid={isTargetMissing}
+                    autoFocus
                   />
+                  {isTargetMissing ? (
+                    <small className="target-job-field-error">
+                      <AlertCircle size={12} />
+                      必须填写目标岗位，评分与改写都以它为基准
+                    </small>
+                  ) : null}
                 </label>
                 <label className="target-job-popover-field">
                   <span>岗位描述（选填）</span>
@@ -1927,53 +1005,7 @@ export function ReviewStudio({
           </div>
         ) : null}
 
-        <div className="topbar-identity-menu" ref={floatingMenuRef}>
-          <button
-            className={`topbar-identity-trigger ${isIdentityMenuOpen ? "is-open" : ""}`}
-            type="button"
-            onClick={() => setIsIdentityMenuOpen((prev) => !prev)}
-            aria-label="打开身份设置"
-            aria-expanded={isIdentityMenuOpen}
-          >
-            {identity?.kind === "user" && identity.user.role === "ADMIN" ? <Shield size={16} /> : <User size={16} />}
-            <span>{identityLabel}</span>
-            <ChevronDown size={14} />
-          </button>
-
-          {isIdentityMenuOpen ? (
-            <div className="topbar-identity-panel">
-              <div className="topbar-identity-summary">
-                <div className={`topbar-identity-avatar ${identity?.kind === "user" && identity.user.role === "ADMIN" ? "is-admin" : ""}`}>
-                  {identity?.kind === "user" ? identity.user.username.slice(0, 2).toUpperCase() : "G"}
-                </div>
-                <div>
-                  <strong>{identity?.kind === "user" ? identity.user.username : "临时游客"}</strong>
-                  <span>
-                    {identity?.kind === "user" ? (identity.user.role === "ADMIN" ? "系统管理员" : "正式账户") : `游客体验 (剩余 ${guestRemainingTrialCount} 次)`}
-                  </span>
-                </div>
-              </div>
-
-              {identity?.kind === "user" && identity.user.role === "ADMIN" ? (
-                <a className="topbar-identity-action admin-link" href="/admin">
-                  <Shield size={14} />
-                  管理面板
-                </a>
-              ) : null}
-              {identity?.kind === "user" ? (
-                <button className="topbar-identity-action logout-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
-                  <LogOut size={14} />
-                  退出登录
-                </button>
-              ) : (
-                <button className="topbar-identity-action admin-link" type="button" onClick={() => { handleLogout(); setIsIdentityMenuOpen(false); }}>
-                  <LogOut size={14} style={{ transform: "rotate(180deg)" }} />
-                  登录正式账号
-                </button>
-              )}
-            </div>
-          ) : null}
-        </div>
+        <LlmConfigMenu />
       </header>
 
       {activeWorkspace === "workflow" && errorMessage ? (
@@ -1988,6 +1020,7 @@ export function ReviewStudio({
           <aside className="workflow-pane">
             <WorkflowTimeline
               setupNode={workflowSetupNode}
+              hasResume={hasResumeSource}
               isInputReady={isInputReady}
               selectedStage={selectedStage}
               stagePayloads={stagePayloads}

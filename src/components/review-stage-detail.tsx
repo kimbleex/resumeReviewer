@@ -1,10 +1,9 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Briefcase,
-  BriefcaseBusiness,
   Calendar,
   Check,
   ChevronDown,
@@ -36,17 +35,16 @@ import {
   type ResumeProfile,
   type ReviewRunResult,
   type ReviewerFeedback,
-  type RevisionSuggestion,
-  type ScoreDetail,
 } from "@/lib/review/schemas";
 
+import { FinalReviewPanel, ReviewerResultPanel, RubricReference } from "@/components/review-report-panels";
+import { rubricForStage, type ReviewerRubricName } from "@/lib/review/rubrics";
+
+const REVIEWER_STAGES: ReviewerRubricName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
 import {
   EMPTY_STAGE_LIVE_STATE,
   STAGE_META,
   formatPhaseLabel,
-  formatPriority,
-  formatReadyLevel,
-  formatStageLabel,
   formatWorkflowStatus,
   isRecord,
   type StageLiveState,
@@ -85,89 +83,6 @@ function CollapsibleSection({
   );
 }
 
-function BulletList({ items, emptyText = "暂无" }: { items: string[]; emptyText?: string }) {
-  if (items.length === 0) {
-    return <p className="muted-copy">{emptyText}</p>;
-  }
-
-  return (
-    <ul className="bullet-list">
-      {items.map((item) => (
-        <li key={item}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
-function ScoreTable({ items }: { items: ScoreDetail[] }) {
-  if (items.length === 0) {
-    return <p className="muted-copy">暂无评分拆解</p>;
-  }
-
-  return (
-    <div className="dimension-scores-box">
-      {items.map((item) => {
-        const scoreClass = item.score >= 85 ? "high" : item.score >= 60 ? "mid" : "low";
-        return (
-          <div key={`${item.label}-${item.score}`} className="dimension-score-row">
-            <div className="dimension-score-header">
-              <span className="dimension-score-label">{item.label}</span>
-              <span className={`dimension-score-badge ${scoreClass}`}>{item.score} 分</span>
-            </div>
-            <div className="dimension-progress-bg">
-              <div className={`dimension-progress-fill ${scoreClass}`} style={{ width: `${item.score}%` }} />
-            </div>
-            {item.reason && <p className="dimension-score-reason">{item.reason}</p>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function SuggestionTable({ suggestions }: { suggestions: RevisionSuggestion[] }) {
-  if (suggestions.length === 0) {
-    return <p className="muted-copy">暂无修改建议</p>;
-  }
-
-  return (
-    <div className="revision-cards-board">
-      {suggestions.map((item, index) => (
-        <div key={`${item.section}-${index}`} className={`revision-card priority-${item.priority}`}>
-          <div className="revision-card-header">
-            <div className="revision-card-section">
-              <span className="revision-section-icon"><BriefcaseBusiness size={14} /></span>
-              <span className="revision-section-name">{item.section}</span>
-            </div>
-            <span className={`revision-priority-pill ${item.priority}`}>
-              {formatPriority(item.priority)}
-            </span>
-          </div>
-
-          <div className="revision-issue-row">
-            <span className="revision-issue-icon"><ShieldAlert size={14} /></span>
-            <span className="revision-issue-text">{item.issue}</span>
-          </div>
-
-          <div className="revision-recommendation-row">
-            <span className="revision-recommendation-label">优化指导方案</span>
-            <span className="revision-recommendation-text">{item.recommendation}</span>
-          </div>
-
-          {item.exampleRewrite && (
-            <div className="revision-comparison-grid">
-              <div className="revision-rewrite-block">
-                <span className="revision-rewrite-label">优化示范样例</span>
-                <pre className="revision-rewrite-content">{item.exampleRewrite}</pre>
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function MetricGrid({ rows }: { rows: Array<{ label: string; value: string }> }) {
   return (
     <dl className="metric-grid">
@@ -178,66 +93,6 @@ function MetricGrid({ rows }: { rows: Array<{ label: string; value: string }> })
         </div>
       ))}
     </dl>
-  );
-}
-
-function CleanStatCard({
-  label,
-  value,
-  detail,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-  tone?: "neutral" | "good" | "warn" | "accent";
-}) {
-  return (
-    <div className={`clean-stat-card tone-${tone}`}>
-      <span className="clean-stat-label">{label}</span>
-      <strong>{value}</strong>
-      {detail && <span className="clean-stat-detail">{detail}</span>}
-    </div>
-  );
-}
-
-function CleanTextList({
-  items,
-  emptyText = "暂无明确结论",
-}: {
-  items: string[];
-  emptyText?: string;
-}) {
-  if (items.length === 0) {
-    return <p className="clean-empty-copy">{emptyText}</p>;
-  }
-
-  return (
-    <ul className="clean-text-list">
-      {items.map((item, index) => (
-        <li key={`${item}-${index}`}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
-function CleanDetailSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="clean-detail-section">
-      <div className="clean-section-heading">
-        <h4>{title}</h4>
-        {description && <p>{description}</p>}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -335,66 +190,6 @@ function LiveConsole({
         </div>
       )}
     </div>
-  );
-}
-
-function ReviewerResultPanel({ feedback }: { feedback: ReviewerFeedback }) {
-  const primarySummary = feedback.reasoningSummary[0] || feedback.perspective || "该专家已完成本轮诊断。";
-  const primaryStrength = feedback.strengths[0] || "暂未识别到需要单独强调的优势。";
-  const primaryConcern = feedback.concerns[0] || "暂未发现高压力风险项。";
-
-  return (
-    <article className="clean-report-shell">
-      <header className="clean-report-hero">
-        <div className="clean-report-title">
-          <span className="clean-kicker">专家诊断</span>
-          <h3>{formatStageLabel(feedback.agentName)} 评审结果</h3>
-          <p>{feedback.perspective}</p>
-        </div>
-        <CleanStatCard
-          label="综合评分"
-          value={`${feedback.overallScore} 分`}
-          detail={feedback.overallScore >= 80 ? "整体表现较强" : feedback.overallScore >= 60 ? "具备优化空间" : "建议优先重构"}
-          tone={feedback.overallScore >= 80 ? "good" : feedback.overallScore >= 60 ? "accent" : "warn"}
-        />
-      </header>
-
-      <div className="clean-insight-grid">
-        <div className="clean-insight-card">
-          <span>核心判断</span>
-          <p>{primarySummary}</p>
-        </div>
-        <div className="clean-insight-card tone-good">
-          <span>最突出优势</span>
-          <p>{primaryStrength}</p>
-        </div>
-        <div className="clean-insight-card tone-warn">
-          <span>首要风险</span>
-          <p>{primaryConcern}</p>
-        </div>
-      </div>
-
-      <CleanDetailSection title="诊断摘要" description="保留专家结论，去掉重复包装，便于快速阅读。">
-        <CleanTextList items={feedback.reasoningSummary} />
-      </CleanDetailSection>
-
-      <div className="clean-two-column">
-        <CleanDetailSection title="优势信号">
-          <CleanTextList items={feedback.strengths} />
-        </CleanDetailSection>
-        <CleanDetailSection title="需要补强">
-          <CleanTextList items={feedback.concerns} />
-        </CleanDetailSection>
-      </div>
-
-      <CleanDetailSection title="能力维度评分">
-        <ScoreTable items={feedback.scoreBreakdown} />
-      </CleanDetailSection>
-
-      <CleanDetailSection title="建议修改路线">
-        <SuggestionTable suggestions={feedback.suggestions} />
-      </CleanDetailSection>
-    </article>
   );
 }
 
@@ -703,105 +498,6 @@ function ResumeProfilePanel({ profile }: { profile: ResumeProfile }) {
   );
 }
 
-function FinalReviewPanel({ result }: { result: ReviewRunResult }) {
-  const finalReview = result.finalReview;
-  const fileName = result.document.path?.split(/[\\/]/).pop() || "未命名简历";
-  const summaryText =
-    finalReview.executiveSummary ||
-    `当前简历综合评分 ${finalReview.overallScore} 分，状态为${formatReadyLevel(finalReview.readyLevel)}。`;
-  const readyLevel = formatReadyLevel(finalReview.readyLevel);
-  const readyColor =
-    finalReview.readyLevel === "strong"
-      ? "var(--green)"
-      : finalReview.readyLevel === "promising"
-        ? "var(--cyan)"
-        : "var(--gold)";
-
-  return (
-    <section className="clean-report-shell" style={{ gap: "clamp(16px, 2.2dvh, 24px)" }}>
-      {/* Header: title left, score right */}
-      <header className="summary-header">
-        <div className="summary-header-left">
-          <span className="clean-kicker">终审结论</span>
-          <h3>智能协同终审诊断书</h3>
-        </div>
-        <div className="summary-header-score">
-          <strong>
-            {finalReview.overallScore}
-            <small> 分</small>
-          </strong>
-          <span style={{ color: readyColor }}>· {readyLevel}</span>
-        </div>
-      </header>
-
-      {/* Executive summary — single paragraph, no split */}
-      <p className="clean-summary-lead">{summaryText}</p>
-
-      {/* Inline metrics — plain text with separators */}
-      <p className="summary-metrics-inline">
-        {finalReview.topPriorities.length} 项优先事项
-        <span className="summary-metrics-sep">·</span>
-        {result.reviewerFeedback.length} 位专家诊断
-        <span className="summary-metrics-sep">·</span>
-        {fileName}
-      </p>
-
-      {/* Priority actions */}
-      <div className="summary-section">
-        <h4 className="summary-section-title">优先行动</h4>
-        <p className="summary-section-desc">建议先完成这些修改，再进入逐段润色。</p>
-        <ol className="priority-list">
-          {finalReview.topPriorities.length > 0 ? (
-            finalReview.topPriorities.map((item, index) => (
-              <li key={`${item}-${index}`}>{item}</li>
-            ))
-          ) : (
-            <li>暂无优先级建议</li>
-          )}
-        </ol>
-      </div>
-
-      {/* Score breakdown */}
-      <div className="summary-section">
-        <h4 className="summary-section-title">评分拆解</h4>
-        <ScoreTable items={finalReview.scoreBreakdown} />
-      </div>
-
-      {/* Expert conclusions — inline strip with mini progress bars */}
-      <div className="summary-section">
-        <h4 className="summary-section-title">各专家结论</h4>
-        <div className="summary-agent-strip">
-          {result.reviewerFeedback.map((item) => (
-            <div key={item.agentName} className="summary-agent-item">
-              <span className="summary-agent-name">
-                {formatStageLabel(item.agentName)}
-              </span>
-              <span className="summary-agent-score">{item.overallScore} 分</span>
-              <div className="summary-agent-bar-bg">
-                <div
-                  className="summary-agent-bar-fill"
-                  style={{ width: `${item.overallScore}%` }}
-                />
-              </div>
-              <span className="summary-agent-note">
-                {item.concerns[0] ||
-                  item.reasoningSummary[0] ||
-                  item.perspective}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Section revisions */}
-      <div className="summary-section">
-        <h4 className="summary-section-title">逐板块修改建议</h4>
-        <SuggestionTable suggestions={finalReview.sectionRevisions} />
-      </div>
-    </section>
-  );
-}
-
 function LoaderResultPanel({ payload }: { payload: unknown }) {
   const loaderPayload = isRecord(payload) ? payload : {};
 
@@ -820,50 +516,6 @@ function LoaderResultPanel({ payload }: { payload: unknown }) {
           { label: "文件存储格式", value: String(loaderPayload.fileType ?? "-") },
         ]}
       />
-    </article>
-  );
-}
-
-function SummaryResultPanel({ payload }: { payload: unknown }) {
-  const parsed = finalResumeReviewSchema.safeParse(payload);
-  if (!parsed.success) {
-    return <EmptyResultPanel title="汇总结果暂不可用" detail="Summary Agent 完成后会展示最终摘要、评分拆解和优先建议。" />;
-  }
-
-  return (
-    <article className="clean-report-shell">
-      <header className="clean-report-hero">
-        <div className="clean-report-title">
-          <span className="clean-kicker">汇总诊断</span>
-          <h3>整合汇总诊断阶段已完成</h3>
-          <p>{parsed.data.executiveSummary || "Summary Agent 已完成汇总，以下是优先结论。"}</p>
-        </div>
-        <CleanStatCard
-          label="综合评分"
-          value={`${parsed.data.overallScore} 分`}
-          detail={formatReadyLevel(parsed.data.readyLevel)}
-          tone={parsed.data.overallScore >= 80 ? "good" : parsed.data.overallScore >= 60 ? "accent" : "warn"}
-        />
-      </header>
-
-      <div className="clean-insight-grid">
-        <CleanStatCard label="就绪等级" value={formatReadyLevel(parsed.data.readyLevel)} detail="简历当前状态" tone="good" />
-        <CleanStatCard label="优先事项" value={`${parsed.data.topPriorities.length} 项`} detail="建议先处理" tone="warn" />
-      </div>
-
-      <CleanDetailSection title="优先行动">
-        <ol className="priority-list">
-          {parsed.data.topPriorities.length > 0 ? (
-            parsed.data.topPriorities.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
-          ) : (
-            <li>暂无优先级建议</li>
-          )}
-        </ol>
-      </CleanDetailSection>
-
-      <CleanDetailSection title="评分拆解">
-        <ScoreTable items={parsed.data.scoreBreakdown} />
-      </CleanDetailSection>
     </article>
   );
 }
@@ -1280,18 +932,34 @@ function RewriteResultPanel({
 const StageResultContent = memo(function StageResultContent({
   finalResult,
   payload,
+  reviewers,
   stage,
 }: {
   finalResult: ReviewRunResult | null;
   payload: unknown;
+  reviewers: Partial<Record<ReviewerRubricName, ReviewerFeedback>>;
   stage: StageName;
 }) {
   if (!payload && !(stage === "summary_agent" && finalResult)) {
+    const rubric = rubricForStage(stage);
     return (
-      <EmptyResultPanel
-        title={`${STAGE_META[stage].label} 结果装载中`}
-        detail="工作流仍在前置或当前节点执行中。任务就绪后，此位置将实时渲染结构化诊断细节板书。"
-      />
+      <>
+        <EmptyResultPanel
+          title={`${STAGE_META[stage].label} 结果装载中`}
+          detail="节点完成后，这里会展示结构化诊断结果。"
+        />
+        {rubric ? (
+          <section className="clean-detail-section rubric-preview-section">
+            <div className="clean-section-heading">
+              <div>
+                <h4>评分标准</h4>
+                <p>该 Agent 将按以下维度与权重打分，综合分 ≈ Σ 维度分 × 权重。</p>
+              </div>
+            </div>
+            <RubricReference rubric={rubric} />
+          </section>
+        ) : null}
+      </>
     );
   }
 
@@ -1311,21 +979,38 @@ const StageResultContent = memo(function StageResultContent({
   if (stage === "hr_agent" || stage === "interviewer_agent" || stage === "career_master_agent") {
     const parsed = reviewerFeedbackSchema.safeParse(payload);
     return parsed.success ? (
-      <ReviewerResultPanel feedback={parsed.data} />
+      <ReviewerResultPanel feedback={parsed.data} stage={stage} />
     ) : (
       <EmptyResultPanel title="专家诊断分析不可用" detail="诊断响应格式损坏，建议您检查模型环境或重新触发分析流程。" />
     );
   }
 
-  if (stage === "summary_agent" && finalResult) {
-    return <FinalReviewPanel result={finalResult} />;
+  if (stage === "summary_agent") {
+    if (finalResult) {
+      const fromResult = Object.fromEntries(
+        REVIEWER_STAGES.flatMap((name, index) => (finalResult.reviewerFeedback[index] ? [[name, finalResult.reviewerFeedback[index]]] : [])),
+      );
+      return (
+        <FinalReviewPanel
+          review={finalResult.finalReview}
+          reviewers={{ ...fromResult, ...reviewers }}
+          fileName={finalResult.document.path?.split(/[\\/]/).pop()}
+        />
+      );
+    }
+    const parsed = finalResumeReviewSchema.safeParse(payload);
+    return parsed.success ? (
+      <FinalReviewPanel review={parsed.data} reviewers={reviewers} />
+    ) : (
+      <EmptyResultPanel title="汇总结果暂不可用" detail="Summary Agent 完成后会展示最终评分、专家加权构成和优先建议。" />
+    );
   }
 
   if (stage === "rewrite_agent") {
     return <RewriteResultPanel payload={payload} finalResult={finalResult} />;
   }
 
-  return <SummaryResultPanel payload={payload} />;
+  return null;
 });
 
 function ResultExplorer({
@@ -1348,6 +1033,16 @@ function ResultExplorer({
   const [activeDetailTab, setActiveDetailTab] = useState<"logs" | "report">("logs");
   const payload = stagePayloads[selectedStage];
   const logCount = liveState.logs?.length ?? 0;
+  const { hr_agent: hrPayload, interviewer_agent: interviewerPayload, career_master_agent: careerPayload } = stagePayloads;
+  const reviewers = useMemo(() => {
+    const entries = REVIEWER_STAGES.map((name, index) => [name, [hrPayload, interviewerPayload, careerPayload][index]] as const);
+    return Object.fromEntries(
+      entries.flatMap(([name, item]) => {
+        const parsed = reviewerFeedbackSchema.safeParse(item);
+        return item && parsed.success ? [[name, parsed.data]] : [];
+      }),
+    ) as Partial<Record<ReviewerRubricName, ReviewerFeedback>>;
+  }, [hrPayload, interviewerPayload, careerPayload]);
 
   return (
     <div className="node-result-layout" key={selectedStage}>
@@ -1423,6 +1118,7 @@ function ResultExplorer({
                   <StageResultContent
                     finalResult={selectedStage === "summary_agent" ? finalResult : null}
                     payload={stagePayloads[selectedStage]}
+                    reviewers={reviewers}
                     stage={selectedStage}
                   />
                 </div>
@@ -1486,5 +1182,3 @@ export default function StageDetailDrawer({
     </div>
   );
 }
-
-export type StageDetailDrawerProps = Parameters<typeof StageDetailDrawer>[0];

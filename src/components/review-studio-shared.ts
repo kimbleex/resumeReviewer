@@ -14,21 +14,10 @@ import type {
   ReviewStageProgressPhase,
   RevisionSuggestion,
 } from "@/lib/review/schemas";
-import type { LocalReviewStageStatus } from "@/lib/review/local-run-cache";
+import { REVIEW_STAGE_ORDER, type ReviewStageName, type ReviewStageStatus } from "@/lib/review/stages";
 
-export type StageStatus = LocalReviewStageStatus;
-
-export const STAGE_ORDER = [
-  "resume_loader",
-  "resume_parser",
-  "hr_agent",
-  "interviewer_agent",
-  "career_master_agent",
-  "summary_agent",
-  "rewrite_agent",
-] as const;
-
-export type StageName = (typeof STAGE_ORDER)[number];
+export type StageName = ReviewStageName;
+export type StageStatus = ReviewStageStatus;
 
 export type StageLogEntry = {
   timestamp: string;
@@ -97,7 +86,7 @@ export function createEmptyStageLiveState(): StageLiveState {
 export const EMPTY_STAGE_LIVE_STATE: StageLiveState = createEmptyStageLiveState();
 
 export function isStageName(value: string): value is StageName {
-  return STAGE_ORDER.includes(value as StageName);
+  return REVIEW_STAGE_ORDER.includes(value as StageName);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +95,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function formatStageLabel(value: string): string {
   return isStageName(value) ? STAGE_META[value].label : value.replace(/_/g, " ");
+}
+
+/** 与 readyLevel 一致的分数档位：80+ 强、65-79 有潜力、<65 需重写。 */
+export function scoreLevel(score: number): "high" | "mid" | "low" {
+  return score >= 80 ? "high" : score >= 65 ? "mid" : "low";
 }
 
 export function formatReadyLevel(value: ReviewRunResult["finalReview"]["readyLevel"]): string {

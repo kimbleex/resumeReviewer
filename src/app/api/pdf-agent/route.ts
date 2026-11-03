@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 
-import { runResumeEditAgent, type ResumeAgentEvent } from "@/lib/agents/resume_agent_chat/agent";
+import { runResumeEditAgent, type ResumeAgentEvent } from "@/lib/agents/resume-chat";
+import { parseLlmConfigFromFormData } from "@/lib/llm/config";
+import { runWithLlmConfig } from "@/lib/llm/model";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,16 +61,19 @@ export async function POST(request: NextRequest): Promise<Response> {
         throw new Error("请输入你希望 Agent 修改的内容。");
       }
 
+      const llmConfig = parseLlmConfigFromFormData(formData);
       const fileBuffer = pdfFile ? Buffer.from(await pdfFile.arrayBuffer()) : Buffer.alloc(0);
 
-      await runResumeEditAgent({
-        fileName: pdfFile?.name || parsedResume?.fileName || "resume.pdf",
-        fileBuffer,
-        prompt,
-        parsedResume: parsedResume,
-        onEvent: push,
-        abortSignal: request.signal,
-      });
+      await runWithLlmConfig(llmConfig, () =>
+        runResumeEditAgent({
+          fileName: pdfFile?.name || parsedResume?.fileName || "resume.pdf",
+          fileBuffer,
+          prompt,
+          parsedResume: parsedResume,
+          onEvent: push,
+          abortSignal: request.signal,
+        }),
+      );
     } catch (error) {
       push({
         type: "error",

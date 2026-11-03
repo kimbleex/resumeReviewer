@@ -1,8 +1,7 @@
 import type { NextRequest } from "next/server";
 
-import { authErrorMessage, resolveReviewActor } from "@/lib/auth/actors";
-import { reserveGuestTrial } from "@/lib/auth/guest";
-import { prisma } from "@/lib/db/prisma";
+import { parseLlmConfigFromFormData } from "@/lib/llm/config";
+import { runWithLlmConfig } from "@/lib/llm/model";
 import { runReviewPipeline, type ReviewPipelineResumeState } from "@/lib/review/pipeline";
 import { reviewStreamChunkSchema, targetJobSchema, type ReviewStageEvent, type ReviewStreamChunk } from "@/lib/review/schemas";
 
@@ -54,16 +53,11 @@ export async function POST(request: NextRequest): Promise<Response> {
           streamClosed = true;
         }
       };
-      let reviewRunId: string | null = null;
 
       try {
         const resumeState = parseResumeState(resumeStateValue);
-        const isResumingLocalRun = Boolean(resumeState?.document);
-        const actorResult = await resolveReviewActor(request, { allowExhaustedGuest: isResumingLocalRun });
+        const llmConfig = parseLlmConfigFromFormData(formData);
 
-        if (!actorResult.ok) {
-          throw new Error(authErrorMessage(actorResult.reason));
-        }
         if (!targetRole) {
           throw new Error("请填写目标岗位名称。");
         }
@@ -77,55 +71,19 @@ export async function POST(request: NextRequest): Promise<Response> {
           description: targetDescription,
         });
 
-        if (actorResult.actor.type === "GUEST" && !isResumingLocalRun) {
-          const reservation = await reserveGuestTrial(actorResult.actor.guest.id);
-          if (!reservation.ok) {
-            throw new Error(authErrorMessage(reservation.reason));
-          }
-        }
-
-        const reviewRun = await prisma.reviewRun.create({
-          data:
-            actorResult.actor.type === "USER"
-              ? {
-                  actorType: "USER",
-                  userId: actorResult.actor.user.id,
-                  targetRole: targetJob.title,
-                }
-              : {
-                  actorType: "GUEST",
-                  guestId: actorResult.actor.guest.id,
-                  targetRole: targetJob.title,
-                },
-        });
-        reviewRunId = reviewRun.id;
-
-        const result = await runReviewPipeline(
-          { resumeFile: resumeFile ?? new File([""], "cached-resume.txt", { type: "text/plain" }), targetJob },
-          (event: ReviewStageEvent) => {
-            push({ type: "event", event });
-          },
-          {},
-          { resumeState, abortSignal: request.signal },
+        const result = await runWithLlmConfig(llmConfig, () =>
+          runReviewPipeline(
+            { resumeFile: resumeFile ?? new File([""], "cached-resume.txt", { type: "text/plain" }), targetJob },
+            (event: ReviewStageEvent) => {
+              push({ type: "event", event });
+            },
+            {},
+            { resumeState, abortSignal: request.signal },
+          ),
         );
-
-        await prisma.reviewRun.update({
-          where: { id: reviewRunId },
-          data: { status: "COMPLETED", completedAt: new Date() },
-        });
 
         push({ type: "result", result });
       } catch (error) {
-        if (reviewRunId) {
-          await prisma.reviewRun.update({
-            where: { id: reviewRunId },
-            data: {
-              status: "FAILED",
-              completedAt: new Date(),
-              errorMessage: error instanceof Error ? error.message : "未知评审错误",
-            },
-          });
-        }
         push({
           type: "error",
           message: error instanceof Error ? error.message : "未知评审错误",

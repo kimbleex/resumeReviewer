@@ -1,0 +1,131 @@
+/* 首页欢迎页 */
+.entry-shell {
+  background: radial-gradient(circle at 50% 50%, #080f1d 0%, #02040a 100%);
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 24px;
+}
+
+/* Abstract glowing particles in background */
+.entry-shell::before {
+  content: '';
+  position: absolute;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(0, 242, 254, 0.06) 0%, transparent 70%);
+  top: 5%;
+  left: 15%;
+  pointer-events: none;
+  z-index: 0;
+  animation: floatGlow 14s infinite alternate ease-in-out;
+}
+
+.entry-shell::after {
+  content: '';
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(79, 172, 254, 0.05) 0%, transparent 70%);
+  bottom: 5%;
+  right: 10%;
+  pointer-events: none;
+  z-index: 0;
+  animation: floatGlow 18s infinite alternate-reverse ease-in-out;
+}
+
+@keyframes floatGlow {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, 40px) scale(1.15); }
+}
+
+/* Intro Splash Container */
+.intro-container {
+  text-align: center;
+  max-width: 600px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: fadeInScale 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Title flare/shimmer gradient */
+.shimmer-eyebrow {
+  font-size: 0.85rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(0, 242, 254, 0.75);
+  text-shadow: 0 0 12px rgba(0, 242, 254, 0.3);
+  margin-bottom: 18px;
+  font-weight: 700;
+  animation: pulseGlow 3s infinite alternate ease-in-out;
+}
+
+.shimmer-title {
+  font-size: clamp(2.3rem, 5.5vw, 4rem);
+  font-weight: 900;
+  margin: 0 0 32px 0;
+  background: linear-gradient(120deg, #00f2fe 0%, #4facfe 35%, #ffffff 65%, #00f2fe 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 4s linear infinite;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+@keyframes textShimmer {
+  0% { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulseGlow {
+  0% { opacity: 0.6; text-shadow: 0 0 8px rgba(0, 242, 254, 0.1); }
+  100% { opacity: 1; text-shadow: 0 0 20px rgba(0, 242, 254, 0.5); }
+}
+
+/* Fade-in Entry CTA Button */
+.premium-cta-btn {
+  margin-top: 12px;
+  height: 54px;
+  padding: 0 34px;
+  border-radius: 30px;
+  border: 1px solid rgba(0, 242, 254, 0.35);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.18), rgba(79, 172, 254, 0.06));
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 24px -6px rgba(0, 242, 254, 0.25);
+  opacity: 0;
+  animation: slideUpFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards;
+}
+
+.premium-cta-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  border-color: rgba(0, 242, 254, 0.75);
+  box-shadow: 0 12px 30px -4px rgba(0, 242, 254, 0.4);
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.28), rgba(79, 172, 254, 0.12));
+}
+
+.premium-cta-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+@keyframes slideUpFadeIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}

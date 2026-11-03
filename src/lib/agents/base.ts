@@ -1,9 +1,9 @@
-import { NoObjectGeneratedError, Output, streamText } from "ai";
+import { NoObjectGeneratedError, Output, streamText, type TextStreamPart, type ToolSet } from "ai";
 import type { z } from "zod";
 
-import { createLanguageModel } from "@/lib/llm";
+import { createLanguageModel } from "@/lib/llm/model";
 
-export type StructuredAgentPhase =
+type StructuredAgentPhase =
   | "requesting_model"
   | "model_thinking"
   | "streaming_output"
@@ -88,17 +88,6 @@ export function createStructuredAgentProgressTracker(options: {
       emitProgress({
         phase: "streaming_output",
         message: "模型思考已完成，正在生成结构化诊断报告。",
-      });
-    },
-    recordPartialOutput(partial: unknown) {
-      if (hasOutputStreamed || partial === undefined) {
-        return;
-      }
-
-      hasOutputStreamed = true;
-      emitProgress({
-        phase: "streaming_output",
-        message: "模型正在生成结构化字段。",
       });
     },
     emitHeartbeat() {
@@ -198,67 +187,80 @@ function tryRecoverResult<TResponseFormat extends z.ZodTypeAny, TResult>(options
   }
 }
 
-export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny, TResult>(options: {
+type AgentRunOptions = {
   name: string;
   systemPrompt: string;
-  responseFormat: TResponseFormat;
   userContent: string;
-  normalize: (value: z.infer<TResponseFormat>) => TResult;
   onProgress?: (event: StructuredAgentProgress) => void;
   abortSignal?: AbortSignal;
-}): Promise<TResult> {
-  let accumulatedText = "";
-  let finishReason = "";
-  let streamFailure: unknown;
+};
+
+type StreamCapture = {
+  text: string;
+  finishReason: string;
+  failure: unknown;
+};
+
+function startAgentRun(options: AgentRunOptions) {
   const progress = createStructuredAgentProgressTracker({
     name: options.name,
     onProgress: options.onProgress,
   });
-
   progress.start();
 
-  const result = streamText({
+  const capture: StreamCapture = { text: "", finishReason: "", failure: undefined };
+  const streamOptions = {
     model: createLanguageModel(),
     system: options.systemPrompt,
     prompt: options.userContent,
     abortSignal: options.abortSignal,
     timeout: getStructuredAgentTimeout(),
-    output: Output.object({
-      name: options.name,
-      schema: options.responseFormat,
-    }),
-    onError({ error }) {
-      streamFailure = error;
+    onError({ error }: { error: unknown }) {
+      capture.failure = error;
     },
-  });
-
+  };
   const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 8_000);
 
-  const fullStreamTask = (async () => {
-    for await (const part of result.fullStream) {
+  async function consume(fullStream: AsyncIterable<TextStreamPart<ToolSet>>) {
+    for await (const part of fullStream) {
       switch (part.type) {
-        case "reasoning-delta": {
+        case "reasoning-delta":
           progress.recordReasoningStarted();
           break;
-        }
-        case "text-delta": {
-          accumulatedText += part.text;
+        case "text-delta":
+          capture.text += part.text;
           progress.recordTextDelta(part.text);
           break;
-        }
-        case "finish": {
-          finishReason = part.finishReason;
+        case "finish":
+          capture.finishReason = part.finishReason;
           break;
-        }
-        case "error": {
-          streamFailure = part.error;
+        case "error":
+          capture.failure = part.error;
           break;
-        }
         default:
           break;
       }
     }
-  })();
+  }
+
+  return { capture, streamOptions, consume, stop: () => clearInterval(heartbeatTimer) };
+}
+
+export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny, TResult>(
+  options: AgentRunOptions & {
+    responseFormat: TResponseFormat;
+    normalize: (value: z.infer<TResponseFormat>) => TResult;
+  },
+): Promise<TResult> {
+  const run = startAgentRun(options);
+  const result = streamText({
+    ...run.streamOptions,
+    output: Output.object({
+      name: options.name,
+      schema: options.responseFormat,
+    }),
+  });
+  const fullStreamTask = run.consume(result.fullStream);
 
   try {
     const output = await result.output;
@@ -266,7 +268,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     options.onProgress?.({
       phase: "validating_output",
       message: "正在校验最终结构化结果。",
-      details: finishReason ? [`finish_reason: ${finishReason}`] : [],
+      details: run.capture.finishReason ? [`finish_reason: ${run.capture.finishReason}`] : [],
     });
 
     await fullStreamTask;
@@ -283,7 +285,7 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
     const recovered = tryRecoverResult({
       responseFormat: options.responseFormat,
       normalize: options.normalize,
-      rawText: NoObjectGeneratedError.isInstance(error) ? error.text ?? accumulatedText : accumulatedText,
+      rawText: NoObjectGeneratedError.isInstance(error) ? error.text ?? run.capture.text : run.capture.text,
     });
 
     if (recovered) {
@@ -295,82 +297,30 @@ export async function invokeStructuredAgent<TResponseFormat extends z.ZodTypeAny
       return recovered;
     }
 
-    if (streamFailure) {
-      throw new Error(structuredAgentErrorMessage(streamFailure));
-    }
-
-    throw new Error(structuredAgentErrorMessage(error));
+    throw new Error(structuredAgentErrorMessage(run.capture.failure ?? error));
   } finally {
-    clearInterval(heartbeatTimer);
+    run.stop();
   }
 }
 
-export async function invokeTextAgent(options: {
-  name: string;
-  systemPrompt: string;
-  userContent: string;
-  onProgress?: (event: StructuredAgentProgress) => void;
-  abortSignal?: AbortSignal;
-}): Promise<string> {
-  let accumulatedText = "";
-  let finishReason = "";
-  let streamFailure: unknown;
-  const progress = createStructuredAgentProgressTracker({
-    name: options.name,
-    onProgress: options.onProgress,
-  });
-
-  progress.start();
-
-  const result = streamText({
-    model: createLanguageModel(),
-    system: options.systemPrompt,
-    prompt: options.userContent,
-    abortSignal: options.abortSignal,
-    timeout: getStructuredAgentTimeout(),
-    onError({ error }) {
-      streamFailure = error;
-    },
-  });
-
-  const heartbeatTimer = setInterval(() => progress.emitHeartbeat(), 8_000);
+export async function invokeTextAgent(options: AgentRunOptions): Promise<string> {
+  const run = startAgentRun(options);
+  const result = streamText(run.streamOptions);
 
   try {
-    for await (const part of result.fullStream) {
-      switch (part.type) {
-        case "reasoning-delta": {
-          progress.recordReasoningStarted();
-          break;
-        }
-        case "text-delta": {
-          accumulatedText += part.text;
-          progress.recordTextDelta(part.text);
-          break;
-        }
-        case "finish": {
-          finishReason = part.finishReason;
-          break;
-        }
-        case "error": {
-          streamFailure = part.error;
-          break;
-        }
-        default:
-          break;
-      }
-    }
+    await run.consume(result.fullStream);
 
-    if (streamFailure) {
-      throw streamFailure;
+    if (run.capture.failure) {
+      throw run.capture.failure;
     }
 
     options.onProgress?.({
       phase: "validating_output",
       message: "正在整理最终文本结果。",
-      details: finishReason ? [`finish_reason: ${finishReason}`] : [],
+      details: run.capture.finishReason ? [`finish_reason: ${run.capture.finishReason}`] : [],
     });
 
-    return accumulatedText.trim();
+    return run.capture.text.trim();
   } catch (error) {
     options.onProgress?.({
       phase: "validating_output",
@@ -379,6 +329,6 @@ export async function invokeTextAgent(options: {
     });
     throw new Error(structuredAgentErrorMessage(error));
   } finally {
-    clearInterval(heartbeatTimer);
+    run.stop();
   }
 }

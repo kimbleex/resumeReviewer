@@ -306,12 +306,6 @@
   background: #050609;
 }
 
-.agent-chat-message-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .agent-chat-message {
   display: flex;
   flex-direction: column;
@@ -329,10 +323,6 @@
   border-color: rgba(0, 242, 254, 0.32);
   background: rgba(0, 242, 254, 0.11);
   color: var(--text);
-}
-
-.agent-chat-message-assistant {
-  align-self: flex-start;
 }
 
 .agent-chat-message span {

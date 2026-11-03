@@ -24,17 +24,54 @@
   display: none;
 }
 
-.compact-upload span {
+/* Input 卡片中的配置行：图标 | 标签 | 值 | 提示 | 状态 */
+.setup-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(0, 242, 254, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 242, 254, 0.06);
+  color: var(--cyan);
+}
+
+.setup-tile-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  text-align: left;
+}
+
+.setup-tile-action {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.setup-tile-value {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.84rem;
-  color: var(--text-dim);
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+  text-align: left;
 }
 
-.compact-upload:hover span {
-  color: var(--text);
+.setup-tile-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(156, 163, 175, 0.55);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .target-job-config {
@@ -88,49 +125,6 @@
 
 .target-job-config.is-open .target-job-trigger > svg:last-child {
   transform: rotate(180deg);
-}
-
-.target-job-trigger-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-  flex: 1;
-  line-height: 1.1;
-}
-
-.target-job-trigger-copy strong {
-  color: var(--text);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.target-job-trigger-copy span {
-  max-width: 100%;
-  color: var(--text-dim);
-  font-size: 0.68rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.target-job-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  padding: 2px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 0.66rem;
-  font-weight: 700;
-}
-
-.target-job-state.is-configured {
-  border-color: rgba(16, 185, 129, 0.26);
-  background: rgba(16, 185, 129, 0.05);
-  color: var(--green);
 }
 
 .target-job-popover {
@@ -240,18 +234,6 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
-.interrupt-action {
-  height: 38px;
-  border-color: rgba(245, 158, 11, 0.32);
-  color: #fbbf24;
-  background: rgba(245, 158, 11, 0.06);
-}
-
-.interrupt-action:hover {
-  border-color: rgba(245, 158, 11, 0.58);
-  background: rgba(245, 158, 11, 0.11);
-}
-
 .target-job-save {
   border: 1px solid rgba(0, 242, 254, 0.32);
   color: var(--text);
@@ -268,23 +250,6 @@
   background: rgba(0, 242, 254, 0.15);
 }
 
-.primary-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 16px;
-  border: 1px solid rgba(0, 242, 254, 0.35);
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.12), rgba(139, 92, 246, 0.12));
-  color: var(--text);
-  font-weight: 600;
-  font-size: 0.84rem;
-  cursor: pointer;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 .primary-action:hover:not(:disabled) {
   border-color: var(--cyan);
   background: linear-gradient(135deg, rgba(0, 242, 254, 0.25), rgba(139, 92, 246, 0.25));
@@ -294,11 +259,6 @@
 
 .primary-action:active:not(:disabled) {
   transform: translateY(0);
-}
-
-.primary-action:disabled {
-  cursor: wait;
-  opacity: 0.6;
 }
 
 .spin-icon {
@@ -352,8 +312,9 @@
   padding: clamp(12px, 1vw, 16px) clamp(13px, 1.1vw, 16px);
 }
 
-.workflow-setup-panel.workflow-input-node {
-  min-height: clamp(160px, 19vh, 190px);
+.workflow-setup-panel.workflow-resume-card,
+.workflow-setup-panel.workflow-target-card {
+  min-height: 0;
   overflow: visible;
 }
 
@@ -390,73 +351,156 @@
   padding: 6px;
 }
 
-.workflow-canvas-controls-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 900;
-}
-
-.workflow-canvas-controls-toggle > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-canvas-controls-toggle em {
-  color: var(--text-dim);
-  font-style: normal;
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workflow-canvas-controls-toggle > svg:last-child {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  transition: transform 0.18s ease;
-}
-
 .workflow-canvas-controls:not(.is-collapsed) .workflow-canvas-controls-toggle > svg:last-child {
   transform: rotate(180deg);
 }
 
 .workflow-setup-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding-top: 6px;
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+  min-height: 0;
+  margin-top: 4px;
+}
+
+.workflow-setup-form .compact-upload,
+.workflow-setup-form .target-job-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 48px;
+  padding: 8px 12px 8px 10px;
+  border-radius: 10px;
 }
 
 .workflow-setup-form .compact-upload {
-  width: 100%;
-  max-width: none;
-  min-height: 42px;
-  justify-content: flex-start;
+  flex: 1;
+}
+
+.workflow-setup-form .compact-upload.is-filled {
+  border-style: solid;
+  border-color: rgba(0, 242, 254, 0.16);
 }
 
 .workflow-setup-form .target-job-config {
+  display: flex;
+  flex: 1;
   min-width: 0;
+  min-height: 48px;
 }
 
-.workflow-setup-form .target-job-trigger {
-  width: 100%;
-  min-height: 42px;
+/* 第一行：Resume（对齐 Loader 列）→ Target Job（对齐 Parser 列），虚线框标出 Input 区 */
+.workflow-setup-container > .workflow-canvas-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: stretch;
+}
+
+.workflow-resume-card {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.workflow-target-card {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.workflow-input-frame {
+  position: absolute;
+  inset: -12px -10px -10px;
+  border: 1px dashed rgba(0, 242, 254, 0.22);
+  border-radius: 16px;
+  background: rgba(0, 242, 254, 0.012);
+  pointer-events: none;
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+
+.workflow-input-frame.is-ready {
+  border-color: rgba(16, 185, 129, 0.36);
+  background: rgba(16, 185, 129, 0.014);
+}
+
+.workflow-input-frame-label {
+  position: absolute;
+  top: -8px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--bg-elevated);
+  color: var(--cyan);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 16px;
+}
+
+.workflow-input-frame-label i {
+  color: var(--text-dim);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.workflow-input-frame.is-ready .workflow-input-frame-label {
+  color: var(--green);
+}
+
+/* 必填校验：卡片描红并轻晃一下 */
+.workflow-node-card.is-invalid {
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.16), 0 0 22px rgba(239, 68, 68, 0.12);
+  animation: inputShake 0.36s ease;
+}
+
+.workflow-node-card.is-invalid::before {
+  background: var(--red);
+}
+
+.workflow-node-card.is-invalid .setup-tile-hint {
+  color: var(--red-dim);
+}
+
+.workflow-node-card.is-invalid .compact-upload,
+.workflow-node-card.is-invalid .target-job-trigger {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.target-job-required {
+  color: var(--red);
+  font-style: normal;
+}
+
+.target-job-popover-field.is-invalid input {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.target-job-field-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--red-dim);
+  font-size: 0.72rem;
+}
+
+@keyframes inputShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+
+.workflow-setup-form .target-job-icon-badge {
+  flex: 0 0 auto;
 }
 
 .workflow-setup-form .target-job-popover {
@@ -500,3 +544,25 @@
   opacity: 0.58;
 }
 
+.workflow-setup-header .workflow-node-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.workflow-setup-header .workflow-node-content strong,
+.workflow-setup-header .workflow-node-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1360px) {
+  .workflow-setup-panel .workflow-start-action {
+    width: 38px;
+    padding: 0;
+  }
+
+  .workflow-setup-panel .workflow-start-action span {
+    display: none;
+  }
+}
