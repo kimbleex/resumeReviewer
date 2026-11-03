@@ -22,5 +22,9 @@
   ],
   "observability": {
     "enabled": true
-  }
+  },
+    "vars": {
+    "AGENT_CHUNK_TIMEOUT_MS": "150000",
+    "AGENT_TOTAL_TIMEOUT_MS": "300000"
+  },
 }
