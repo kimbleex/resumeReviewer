@@ -107,7 +107,30 @@ Optional: copy `.env.template` to `.env` to tune agent timeouts (`AGENT_TOTAL_TI
 
 ## Docker Deployment | 服务器 Docker 部署
 
-服务器需安装 Docker Engine 和 Compose 插件。将本仓库上传或克隆到服务器，
+可以在本地构建镜像并压缩上传，服务器无需项目源码或 Node.js 环境。
+以下以 Linux x86_64 服务器为例（ARM 服务器将平台改为 `linux/arm64`）：
+
+```bash
+# 本地构建并导出
+docker buildx build --platform linux/amd64 -t resume-reviewer:latest --load .
+docker save resume-reviewer:latest | gzip > resume-reviewer.tar.gz
+
+# 上传（替换服务器地址和目标目录）
+scp resume-reviewer.tar.gz 用户名@服务器IP:/你的部署目录/
+```
+
+服务器进入上传目录，加载并启动：
+
+```bash
+docker load -i resume-reviewer.tar.gz
+docker run -d --name resume-reviewer --restart unless-stopped --init \
+  -p 3000:3000 resume-reviewer:latest
+docker logs -f --tail 100 resume-reviewer
+```
+
+更新已有部署时，先加载新镜像，再停止占用 3000 端口的旧容器，使用新的容器名启动；验证正常后再删除旧容器。
+
+也可以使用源码构建方式：服务器安装 Docker Engine 和 Compose 插件，将本仓库上传或克隆到服务器，
 在项目根目录执行：
 
 ```bash
@@ -117,7 +140,7 @@ docker compose logs -f --tail=100 app
 
 访问 `http://服务器IP:3000`（需要服务器允许访问该端口）。
 模型连接仍在网页右上角配置。镜像使用 Next.js standalone，
-不需要 Cloudflare 绑定或 R2。构建阶段会安装依赖并执行一次 Next.js 构建。
+构建阶段会安装依赖并执行一次 Next.js 构建。
 
 Compose 默认设置单次模型调用总超时 300 秒、流式数据块等待超时 150 秒。
 可在根目录 `.env` 中覆盖（Compose 自动读取此文件，镜像不包含它）：
@@ -155,36 +178,6 @@ location / {
 
 该示例假设 Nginx 直接运行在宿主机。域名与 HTTPS 在反向代理中配置。
 应用超时无法覆盖上游模型服务自身的超时或错误。
-
-## Cloudflare Workers Deployment | Cloudflare 部署
-
-Cloudflare Workers Builds settings:
-
-| Setting / 设置 | Value / 值 |
-| --- | --- |
-| Build command / 构建命令 | `pnpm run build:cloudflare` |
-| Deploy command / 部署命令 | `pnpm run deploy` |
-
-OpenNext runs `next build` internally. Do not add a separate `pnpm run build` step.
-OpenNext 会自动执行 Next.js 构建；部署命令仅部署已有产物，避免重复构建。
-Wrangler 和 OpenNext 已加入项目依赖，配置与锁文件应一并提交。
-
-`wrangler.jsonc` uses `resumereviewer` for both the Worker name and
-`WORKER_SELF_REFERENCE`. Keep both values aligned with the Cloudflare Worker.
-The R2 binding reuses the existing `resume-mutil-agent-opennext-cache` bucket;
-create that bucket first if deploying to a different account.
-
-Worker 名称与自引用绑定统一为 `resumereviewer`。R2 绑定复用已有的
-`resume-mutil-agent-opennext-cache` 桶；如更换账户，需先创建该桶。
-
-```bash
-# Build and preview locally / 本地构建并预览
-pnpm run preview
-
-# Build, then deploy / 构建后部署（需要 Cloudflare 认证）
-pnpm run build:cloudflare
-pnpm run deploy
-```
 
 ## 🧪 Verification & Unit Testing | 静态校验与单元测试
 

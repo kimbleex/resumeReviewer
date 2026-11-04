@@ -40,7 +40,6 @@
   ],
   "exclude": [
     "node_modules",
-    ".open-next",
     ".next/dev",
     ".next/dev/types/**/*.ts"
   ]

@@ -1,8 +1,6 @@
 # Dependencies & build output
 node_modules/
 .next/
-.open-next/
-.wrangler/
 coverage/
 dist/
 *.tsbuildinfo

@@ -9,9 +9,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cloudflare": "opennextjs-cloudflare build",
-    "deploy": "opennextjs-cloudflare deploy",
-    "preview": "pnpm run build:cloudflare && opennextjs-cloudflare preview",
     "start": "next start",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
@@ -19,7 +16,6 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.137",
     "@ai-sdk/openai": "^3.0.66",
-    "@opennextjs/cloudflare": "^1.20.15",
     "ai": "^6.0.193",
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^0.552.0",
@@ -35,7 +31,6 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "wrangler": "^4.156.1"
+    "typescript": "^5.9.3"
   }
 }
