@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { runResumeEditAgent, type ResumeAgentEvent } from "@/lib/agents/resume-chat";
 import { parseLlmConfigFromFormData } from "@/lib/llm/config";
 import { runWithLlmConfig } from "@/lib/llm/model";
+import { parseChatHistory } from "@/lib/agents/chat-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,9 @@ function encodeEvent(encoder: TextEncoder, event: ResumeAgentEvent): Uint8Array 
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
+  if (process.env.AGENT_CHAT_ENABLED !== "true") {
+    return Response.json({ message: "Agent Chat 未开启。" }, { status: 404 });
+  }
   const formData = await request.formData();
   const fileValue = formData.get("pdfFile");
   const pdfFile = fileValue instanceof File && fileValue.size > 0 ? fileValue : null;
@@ -54,11 +58,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   void (async () => {
     try {
-      if (!pdfFile && !parsedResume) {
-        throw new Error("请先上传简历 PDF 文件。");
-      }
       if (!prompt) {
-        throw new Error("请输入你希望 Agent 修改的内容。");
+        throw new Error("请输入你想讨论的问题。");
       }
 
       const llmConfig = parseLlmConfigFromFormData(formData);
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           fileName: pdfFile?.name || parsedResume?.fileName || "resume.pdf",
           fileBuffer,
           prompt,
+          history: parseChatHistory(formData.get("history")),
           parsedResume: parsedResume,
           onEvent: push,
           abortSignal: request.signal,

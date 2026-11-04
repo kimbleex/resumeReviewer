@@ -49,29 +49,24 @@ export const STAGE_META: Record<
     focus: "深度结构化解析候选人画像",
     icon: Bot,
   },
-  scoring_agent: {
-    label: "评分",
-    focus: "一次完成三视角评分，立即展示加权结果",
-    icon: CheckCircle2,
-  },
   hr_agent: {
     label: "HR Agent",
-    focus: "基于已出评分，补充招聘与 ATS 建议",
+    focus: "招聘视角评估与 ATS 规则适配",
     icon: BriefcaseBusiness,
   },
   interviewer_agent: {
     label: "Interviewer Agent",
-    focus: "基于已出评分，补充技术证据与面试建议",
+    focus: "技术深度检验、可追问性与履历查验",
     icon: Cpu,
   },
   career_master_agent: {
     label: "Career Master Agent",
-    focus: "基于已出评分，补充定位与差异化建议",
+    focus: "资深职业大师评估与高阶行业叙事",
     icon: Sparkles,
   },
   summary_agent: {
     label: "Summary",
-    focus: "去重整合，输出最多5项修改行动",
+    focus: "意见整合并产出修改指导",
     icon: CheckCircle2,
   },
   rewrite_agent: {

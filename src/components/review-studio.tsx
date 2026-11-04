@@ -49,7 +49,7 @@ import { LlmConfigMenu } from "@/components/llm-config-menu";
 import { appendLlmConfigToFormData } from "@/lib/llm/config";
 import { readRequiredLlmConfig } from "@/lib/llm/storage";
 
-// Result panels (incl. html2pdf export + heavy lucide icons) are only needed
+// Result panels are only needed
 // once a stage-detail drawer is opened, so load them in a separate chunk.
 const StageDetailDrawer = dynamic(() => import("@/components/review-stage-detail"), {
   ssr: false,
@@ -66,8 +66,6 @@ function getStagesToReset(startStage: StageName): StageName[] {
     return [...STAGE_ORDER];
   } else if (startStage === "resume_parser") {
     return STAGE_ORDER.slice(1);
-  } else if (startStage === "scoring_agent") {
-    return STAGE_ORDER.slice(2);
   } else if (parallelReviewers.includes(startStage)) {
     return [startStage, "summary_agent", "rewrite_agent"];
   } else if (startStage === "summary_agent") {
@@ -175,7 +173,7 @@ function parseChunkLine(line: string) {
   return reviewStreamChunkSchema.parse(JSON.parse(line));
 }
 
-export function ReviewStudio() {
+export function ReviewStudio({ agentChatEnabled }: { agentChatEnabled: boolean }) {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [cachedResumeFileName, setCachedResumeFileName] = useState("");
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
@@ -196,12 +194,15 @@ export function ReviewStudio() {
   const [selectedStage, setSelectedStage] = useState<StageName>("resume_loader");
   const [detailsStage, setDetailsStage] = useState<StageName | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<"workflow" | "agent">("workflow");
+  const [hasOpenedAgentChat, setHasOpenedAgentChat] = useState(false);
   const phaseTimelineRef = useRef<Partial<Record<StageName, ReviewStageProgressPhase>>>({});
   const pendingProgressEventsRef = useRef<Array<{ stage: StageName; event: ReviewStageEvent }>>([]);
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const runningStagesRef = useRef<StageName[]>([]);
   const selectedStageRef = useRef<StageName>("resume_loader");
+  const localSnapshotRef = useRef<LocalReviewRunSnapshot | null>(null);
+  const localRunLoadedRef = useRef(false);
   const hasLocalCheckpoint = hasReusableReviewState(stagePayloads);
   const canResumeLocalRun = Boolean(currentRunId && hasLocalCheckpoint && !finalResult);
   const uploadLabel = resumeFile ? resumeFile.name : cachedResumeFileName || "点击选择简历文件";
@@ -234,6 +235,8 @@ export function ReviewStudio() {
         if (cancelled) {
           return;
         }
+        localRunLoadedRef.current = true;
+        localSnapshotRef.current = snapshot;
 
         if (!snapshot) {
           setCurrentRunId(null);
@@ -278,7 +281,7 @@ export function ReviewStudio() {
           setErrorMessage("已恢复上次本地断点，可点击继续诊断。");
         }
       })
-      .catch(() => undefined);
+      .catch(() => { localRunLoadedRef.current = true; });
 
     return () => {
       cancelled = true;
@@ -286,27 +289,26 @@ export function ReviewStudio() {
   }, []);
 
   useEffect(() => {
-    if (!currentRunId) {
+    if (!currentRunId || !localRunLoadedRef.current) {
       return;
     }
 
-    const saveTimer = window.setTimeout(() => {
-      const snapshot: LocalReviewRunSnapshot = {
-        runId: currentRunId,
-        resumeFileName: resumeFile?.name || cachedResumeFileName || "cached-resume.txt",
-        targetRole,
-        targetDescription,
-        stageStatus,
-        stagePayloads,
-        stageStreams: sanitizeStageStreams(stageStreams),
-        finalResult,
-        updatedAt: Date.now(),
-      };
+    const snapshot: LocalReviewRunSnapshot = {
+      runId: currentRunId,
+      resumeFileName: resumeFile?.name || cachedResumeFileName || "cached-resume.txt",
+      targetRole,
+      targetDescription,
+      stageStatus,
+      stagePayloads,
+      stageStreams: sanitizeStageStreams(stageStreams),
+      finalResult,
+      updatedAt: Date.now(),
+    };
+    localSnapshotRef.current = snapshot;
+    void saveLocalReviewRun(snapshot).catch(() => {
+      setErrorMessage("本地保存失败，请先下载已生成的 Markdown，避免刷新后丢失。");
+    });
 
-      void saveLocalReviewRun(snapshot).catch(() => undefined);
-    }, 250);
-
-    return () => window.clearTimeout(saveTimer);
   }, [
     cachedResumeFileName,
     currentRunId,
@@ -314,10 +316,38 @@ export function ReviewStudio() {
     resumeFile?.name,
     stagePayloads,
     stageStatus,
-    stageStreams,
     targetDescription,
     targetRole,
   ]);
+
+  useEffect(() => {
+    const saveBeforeLeaving = () => {
+      const snapshot = localSnapshotRef.current;
+      if (snapshot) void saveLocalReviewRun(snapshot).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", saveBeforeLeaving);
+    return () => window.removeEventListener("pagehide", saveBeforeLeaving);
+  }, []);
+
+  function persistStreamResult(event: ReviewStageEvent | ReviewRunResult) {
+    const snapshot = localSnapshotRef.current;
+    if (!snapshot) return;
+    const next = { ...snapshot, updatedAt: Date.now() };
+    if ("kind" in event) {
+      if (!isStageName(event.stage)) return;
+      const stage = event.stage;
+      next.stageStatus = { ...snapshot.stageStatus, [stage]: event.kind === "stage_completed" ? "done" : "running" };
+      if (event.payload) next.stagePayloads = { ...snapshot.stagePayloads, [stage]: event.payload };
+    } else {
+      next.finalResult = event;
+      if (event.rewrite) next.stagePayloads = { ...snapshot.stagePayloads, rewrite_agent: event.rewrite };
+    }
+    localSnapshotRef.current = next;
+    // saveLocalReviewRun writes the recovery copy synchronously before the UI mounts.
+    void saveLocalReviewRun(next).catch(() => {
+      setErrorMessage("本地保存失败，请先下载已生成的 Markdown，避免刷新后丢失。");
+    });
+  }
 
   const flushPendingProgressEvents = useCallback(() => {
     if (progressFlushTimerRef.current) {
@@ -407,7 +437,7 @@ export function ReviewStudio() {
     }
 
     if (nextRole !== targetRole || targetDescriptionDraft.trim() !== targetDescription) {
-      const resetStages = getStagesToReset("scoring_agent");
+      const resetStages = STAGE_ORDER.slice(2);
       setStagePayloads((previous) => Object.fromEntries(Object.entries(previous).filter(([stage]) => !resetStages.includes(stage as StageName))));
       setStageStreams((previous) => Object.fromEntries(Object.entries(previous).filter(([stage]) => !resetStages.includes(stage as StageName))));
       setStageStatus((previous) => ({ ...previous, ...Object.fromEntries(resetStages.map((stage) => [stage, "pending"])) }));
@@ -469,6 +499,7 @@ export function ReviewStudio() {
         }
         if (chunk.type === "result") {
           receivedTerminalChunk = true;
+          persistStreamResult(chunk.result);
           flushPendingProgressEvents();
           setFinalResult(chunk.result);
           setSelectedStage("rewrite_agent");
@@ -497,6 +528,10 @@ export function ReviewStudio() {
 
   function handleStageEvent(event: ReviewStageEvent) {
     const stage = isStageName(event.stage) ? event.stage : null;
+
+    if (stage && ["stage_started", "stage_checkpoint", "stage_completed"].includes(event.kind)) {
+      persistStreamResult(event);
+    }
 
     if (event.kind === "stage_progress" && stage) {
       queueStageProgressEvent(stage, event);
@@ -637,8 +672,21 @@ export function ReviewStudio() {
 
     const isResumingLocalRun = Boolean(opts.payloads.resume_loader);
     const nextRunId = isResumingLocalRun && currentRunId ? currentRunId : createReviewRunId();
-
+    localSnapshotRef.current = {
+      runId: nextRunId,
+      resumeFileName: resumeFile?.name || cachedResumeFileName || "cached-resume.txt",
+      targetRole,
+      targetDescription,
+      stageStatus: opts.status,
+      stagePayloads: opts.payloads,
+      stageStreams: {},
+      finalResult: opts.finalResult,
+      updatedAt: Date.now(),
+    };
     setErrorMessage("");
+    void saveLocalReviewRun(localSnapshotRef.current).catch(() => {
+      setErrorMessage("本地保存不可用，生成后请及时下载 Markdown。");
+    });
     setIsRunning(true);
     setRunningStages([]);
     setCurrentRunId(nextRunId);
@@ -711,6 +759,7 @@ export function ReviewStudio() {
     }
   }, [
     currentRunId,
+    cachedResumeFileName,
     resumeFile,
     targetRole,
     targetDescription,
@@ -1014,14 +1063,14 @@ export function ReviewStudio() {
             <GitBranch size={15} />
             <span>Workflow</span>
           </button>
-          <button
+          {agentChatEnabled ? <button
             className={`workspace-nav-button ${activeWorkspace === "agent" ? "is-active" : ""}`}
             type="button"
-            onClick={() => setActiveWorkspace("agent")}
+            onClick={() => { setHasOpenedAgentChat(true); setActiveWorkspace("agent"); }}
           >
             <FilePenLine size={15} />
             <span>Agent Chat</span>
-          </button>
+          </button> : null}
         </nav>
 
         {activeWorkspace === "agent" ? (
@@ -1070,9 +1119,12 @@ export function ReviewStudio() {
             />
           ) : null}
         </section>
-      ) : (
-        <PdfAgentWorkbench />
-      )}
+      ) : null}
+      {agentChatEnabled && hasOpenedAgentChat ? (
+        <div className="agent-workspace-container" hidden={activeWorkspace !== "agent"}>
+          <PdfAgentWorkbench />
+        </div>
+      ) : null}
     </main>
   );
 }

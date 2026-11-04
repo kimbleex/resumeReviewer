@@ -3,8 +3,6 @@ import { runResumeParser } from "@/lib/agents/workflow/resume-parser";
 import { reviewerAgents, type ReviewerAgent } from "@/lib/agents/workflow/reviewers";
 import { runRewriteAgent } from "@/lib/agents/workflow/rewrite";
 import { runSummaryAgent } from "@/lib/agents/workflow/summary";
-import { runScoringAgent } from "@/lib/agents/workflow/scoring";
-import { reviewScoringSchema, type ReviewScoring } from "@/lib/review/scoring";
 import { loadResumeSource, type ResumeSource } from "@/lib/resume/loader";
 import {
   finalResumeReviewSchema,
@@ -36,13 +34,11 @@ type ReviewPipelineDependencies = {
     abortSignal?: AbortSignal,
   ) => Promise<ResumeProfile>;
   reviewerAgents: ReviewerAgent[];
-  runScoring: typeof runScoringAgent;
   runSummary: (
     reviewerFeedback: ReviewerFeedback[],
     targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
     abortSignal?: AbortSignal,
-    scoring?: FinalResumeReview,
     checkpoint?: ReviewCallCheckpoint,
     onCheckpoint?: (checkpoint: ReviewCallCheckpoint) => void,
   ) => Promise<FinalResumeReview>;
@@ -60,7 +56,6 @@ type ReviewPipelineDependencies = {
 export type ReviewPipelineResumeState = {
   document?: ResumeDocument;
   profile?: ResumeProfile;
-  scoring?: ReviewScoring;
   checkpoints?: Partial<Record<ReviewStageName, ReviewCallCheckpoint>>;
   reviewerFeedback?: Partial<Record<ReviewerAgent["name"], ReviewerFeedback>>;
   finalReview?: FinalResumeReview;
@@ -71,7 +66,6 @@ const defaultDependencies: ReviewPipelineDependencies = {
   loadResume: loadResumeSource,
   runResumeParser,
   reviewerAgents,
-  runScoring: runScoringAgent,
   runSummary: runSummaryAgent,
   runRewrite: runRewriteAgent,
 };
@@ -81,7 +75,6 @@ type ReviewEventHandler = (event: ReviewStageEvent) => void;
 const stageTitles: Record<ReviewStageName, string> = {
   resume_loader: "Resume Loader",
   resume_parser: "Resume Parser",
-  scoring_agent: "三视角评分",
   hr_agent: "HR Agent",
   interviewer_agent: "Interviewer Agent",
   career_master_agent: "Career Master",
@@ -106,23 +99,21 @@ function normalizeResumeState(state: ReviewPipelineResumeState | null | undefine
 
   const reviewerFeedback: ReviewPipelineResumeState["reviewerFeedback"] = {};
   const checkpoints: NonNullable<ReviewPipelineResumeState["checkpoints"]> = {};
-  if (state.scoring) {
-    const allowedSteps = {
-      hr_agent: "assessment", interviewer_agent: "assessment", career_master_agent: "assessment",
-      summary_agent: "priorities", rewrite_agent: "rewrite_content",
-    } as const;
-    for (const [stage, step] of Object.entries(allowedSteps)) {
-      const checkpoint = state.checkpoints?.[stage as ReviewStageName];
-      if (checkpoint) {
-        const parsed = reviewCallCheckpointSchema.parse(checkpoint);
-        if (parsed.checkpoint !== step) throw new Error("本地小步骤断点与阶段不匹配，请重跑该阶段。");
-        checkpoints[stage as ReviewStageName] = parsed;
-      }
+  const allowedSteps = {
+    hr_agent: ["score", "assessment"], interviewer_agent: ["score", "assessment"], career_master_agent: ["score", "assessment"],
+    summary_agent: ["priorities"], rewrite_agent: ["rewrite_content"],
+  } as const;
+  for (const [stage, steps] of Object.entries(allowedSteps)) {
+    const checkpoint = state.checkpoints?.[stage as ReviewStageName];
+    if (checkpoint) {
+      const parsed = reviewCallCheckpointSchema.parse(checkpoint);
+      if (!(steps as readonly string[]).includes(parsed.checkpoint)) throw new Error("本地小步骤断点与阶段不匹配，请重跑该阶段。");
+      checkpoints[stage as ReviewStageName] = parsed;
     }
   }
   for (const stage of ["hr_agent", "interviewer_agent", "career_master_agent"] as const) {
     const feedback = state.reviewerFeedback?.[stage];
-    if (feedback && state.scoring) {
+    if (feedback) {
       reviewerFeedback[stage] = reviewerFeedbackSchema.parse(feedback);
     }
   }
@@ -130,12 +121,10 @@ function normalizeResumeState(state: ReviewPipelineResumeState | null | undefine
   return {
     document: state.document ? resumeDocumentSchema.parse(state.document) : undefined,
     profile: state.profile ? resumeProfileSchema.parse(state.profile) : undefined,
-    scoring: state.scoring ? reviewScoringSchema.parse(state.scoring) : undefined,
     checkpoints,
     reviewerFeedback,
-    // Legacy runs have no scoring checkpoint; only their source/profile can be reused.
-    finalReview: state.scoring && state.finalReview ? finalResumeReviewSchema.parse(state.finalReview) : undefined,
-    rewrite: state.scoring && state.rewrite ? resumeRewriteSchema.parse(state.rewrite) : undefined,
+    finalReview: state.finalReview ? finalResumeReviewSchema.parse(state.finalReview) : undefined,
+    rewrite: state.rewrite ? resumeRewriteSchema.parse(state.rewrite) : undefined,
   };
 }
 
@@ -178,6 +167,7 @@ function emitStageProgress(
 
 function emitCallCheckpoint(handler: ReviewEventHandler | undefined, stage: ReviewStageName, checkpoint: ReviewCallCheckpoint) {
   const messages = {
+    score: "本视角评分已就绪，继续生成优势与问题",
     assessment: "优势与问题已就绪，继续生成修改建议",
     priorities: "优先行动已就绪，继续生成逐板块建议",
     rewrite_content: "简历正文已就绪，可查看和下载；继续生成改写说明",
@@ -268,32 +258,7 @@ export async function runReviewPipeline(
     emitCachedStageCompleted(eventHandler, "resume_parser", profile, profile.reasoningSummary);
   }
 
-  // Scores are a separate checkpoint: visible before any advice request starts.
-  throwIfAborted(abortSignal);
-  const scoring = resumeState.scoring ?? await (async () => {
-    emit(eventHandler, {
-      kind: "stage_started", stage: "scoring_agent", phase: null,
-      title: "三视角评分", message: "先生成评分与简短证据，完成后立即展示",
-      details: ["本次只评分，不生成修改建议；总分由代码按权重计算。"],
-      snippet: "", payload: null,
-    });
-    const scores = await deps.runScoring(
-      profile, targetJob,
-      (progress) => emitStageProgress(eventHandler, "scoring_agent", progress),
-      abortSignal,
-    );
-    emit(eventHandler, {
-      kind: "stage_completed", stage: "scoring_agent", phase: null,
-      title: "评分已就绪", message: `加权总分 ${scores.review.overallScore}/100，正在继续生成建议`,
-      details: ["HR 35% · 面试官 35% · 职业定位 30%"], snippet: "", payload: scores,
-    });
-    return scores;
-  })();
-  if (resumeState.scoring) {
-    emitCachedStageCompleted(eventHandler, "scoring_agent", scoring);
-  }
-
-  // ── Stage 3: Short advice calls use the already-completed scores ──
+  // Each reviewer independently publishes scores, assessment and suggestions.
   throwIfAborted(abortSignal);
   // Keep successful sibling checkpoints and settle every call before closing the stream.
   const reviewerResults = await Promise.allSettled(
@@ -309,7 +274,7 @@ export async function runReviewPipeline(
         stage: reviewer.name,
         phase: null,
         title: `${stageTitles[reviewer.name]} 开始评审`,
-      message: `评分已完成，正在从 ${reviewer.perspective} 视角补充最多3条建议`,
+        message: `正在从 ${reviewer.perspective} 视角依次生成评分、优势与问题、修改建议`,
         details: [
           "已接收 Parser 节点输出 → 候选人结构化画像与评估维度",
           `已接收目标岗位配置 →【${targetJob.title}】`,
@@ -324,7 +289,6 @@ export async function runReviewPipeline(
           emitStageProgress(eventHandler, reviewer.name, progress);
         },
         abortSignal,
-        scoring.reviewers[reviewer.name],
         resumeState.checkpoints?.[reviewer.name],
         (checkpoint) => emitCallCheckpoint(eventHandler, reviewer.name, checkpoint),
       );
@@ -370,7 +334,6 @@ export async function runReviewPipeline(
         emitStageProgress(eventHandler, "summary_agent", progress);
       },
       abortSignal,
-      scoring.review,
       resumeState.checkpoints?.summary_agent,
       (checkpoint) => emitCallCheckpoint(eventHandler, "summary_agent", checkpoint),
     );

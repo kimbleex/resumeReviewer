@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, LoaderCircle, Play, X } from "lucide-react";
 
 import { REVIEW_STAGE_ORDER as STAGE_ORDER } from "@/lib/review/stages";
@@ -12,6 +12,7 @@ import {
   type StageName,
   type StageStatus,
 } from "@/components/review-studio-shared";
+import { getReviewCallCheckpoint } from "@/lib/review/schemas";
 import { getReviewDisplayPayloads } from "@/lib/review/scoring";
 import { WorkflowNodeInsight } from "@/components/workflow-node-insight";
 
@@ -22,20 +23,20 @@ function isStageReadyToRun(stage: StageName, stagePayloads: Partial<Record<Stage
   if (stage === "resume_parser") {
     return Boolean(stagePayloads.resume_loader);
   }
-  if (stage === "scoring_agent") return Boolean(stagePayloads.resume_parser);
   const parallelReviewers: StageName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
   if (parallelReviewers.includes(stage)) {
-    return Boolean(stagePayloads.scoring_agent);
+    return Boolean(stagePayloads.resume_parser);
   }
   if (stage === "summary_agent") {
     return Boolean(
       stagePayloads.hr_agent &&
       stagePayloads.interviewer_agent &&
-      stagePayloads.career_master_agent
+      stagePayloads.career_master_agent &&
+      ![stagePayloads.hr_agent, stagePayloads.interviewer_agent, stagePayloads.career_master_agent].some(getReviewCallCheckpoint)
     );
   }
   if (stage === "rewrite_agent") {
-    return Boolean(stagePayloads.summary_agent);
+    return Boolean(stagePayloads.summary_agent && !getReviewCallCheckpoint(stagePayloads.summary_agent));
   }
   return false;
 }
@@ -339,7 +340,7 @@ const WorkflowBranchConnector = memo(function WorkflowBranchConnector({
     const update = () => {
       const parent = el.closest('.workflow-flowchart');
       if (!parent) return;
-      const parserCard = parent.querySelector('.workflow-node-scoring_agent');
+      const parserCard = parent.querySelector('.workflow-node-resume_parser');
       const hrCard = parent.querySelector('.workflow-node-hr_agent');
       const interviewerCard = parent.querySelector('.workflow-node-interviewer_agent');
       const careerCard = parent.querySelector('.workflow-node-career_master_agent');
@@ -365,7 +366,7 @@ const WorkflowBranchConnector = memo(function WorkflowBranchConnector({
     const flowParent = el.closest('.workflow-flowchart');
     if (flowParent) {
       ro.observe(flowParent);
-      for (const sel of ['.workflow-node-scoring_agent', '.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent']) {
+      for (const sel of ['.workflow-node-resume_parser', '.workflow-node-hr_agent', '.workflow-node-interviewer_agent', '.workflow-node-career_master_agent']) {
         const n = flowParent.querySelector(sel);
         if (n) ro.observe(n);
       }
@@ -774,7 +775,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
   onInterrupt,
   isRunningAny,
 }: WorkflowTimelineProps) {
-  const displayPayloads = getReviewDisplayPayloads(stagePayloads);
+  const displayPayloads = useMemo(() => getReviewDisplayPayloads(stagePayloads), [stagePayloads]);
   const getLiveState = (stage: StageName) => stageStreams[stage] ?? EMPTY_STAGE_LIVE_STATE;
   const getStatus = (stage: StageName) => stageStatus[stage];
   const isReady = (stage: StageName) => isStageReadyToRun(stage, stagePayloads);
@@ -838,33 +839,10 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
         />
       </div>
 
-      <WorkflowVerticalArrow
-        fromSelector=".workflow-node-resume_parser"
-        toSelector=".workflow-node-scoring_agent"
-        isDone={getStatus("scoring_agent") === "done"}
-        isRunning={getStatus("scoring_agent") === "running"}
-        isReady={getStatus("resume_parser") === "done"}
-      />
-      <div className="workflow-scoring-container">
-        <StageWorkflowCard
-          stage="scoring_agent"
-          index={3}
-          isSelected={selectedStage === "scoring_agent"}
-          payload={displayPayloads.scoring_agent}
-          status={getStatus("scoring_agent")}
-          liveState={getLiveState("scoring_agent")}
-          onOpenStageDetails={onOpenStageDetails}
-          onStartStage={onStartStage}
-          onInterrupt={onInterrupt}
-          isRunningAny={isRunningAny}
-          isReady={isReady("scoring_agent")}
-        />
-      </div>
-
-      {/* Scores -> Parallel advice calls */}
+      {/* Branch Parser -> Parallel Reviewer Agent */}
       <div className="workflow-branch-container">
         <WorkflowBranchConnector
-          isParserDone={getStatus("scoring_agent") === "done"}
+          isParserDone={getStatus("resume_parser") === "done"}
           hrStatus={getStatus("hr_agent")}
           interviewerStatus={getStatus("interviewer_agent")}
           careerStatus={getStatus("career_master_agent")}
@@ -875,7 +853,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
       <div className="workflow-reviewer-row">
         <StageWorkflowCard
           stage="hr_agent"
-          index={4}
+          index={3}
           isSelected={selectedStage === "hr_agent"}
           payload={displayPayloads["hr_agent"]}
           status={getStatus("hr_agent")}
@@ -888,7 +866,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
         />
         <StageWorkflowCard
           stage="interviewer_agent"
-          index={5}
+          index={4}
           isSelected={selectedStage === "interviewer_agent"}
           payload={displayPayloads["interviewer_agent"]}
           status={getStatus("interviewer_agent")}
@@ -901,7 +879,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
         />
         <StageWorkflowCard
           stage="career_master_agent"
-          index={6}
+          index={5}
           isSelected={selectedStage === "career_master_agent"}
           payload={displayPayloads["career_master_agent"]}
           status={getStatus("career_master_agent")}
@@ -928,7 +906,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
       <div className="workflow-summary-container">
         <StageWorkflowCard
           stage="summary_agent"
-          index={7}
+          index={6}
           isSelected={selectedStage === "summary_agent"}
           payload={displayPayloads["summary_agent"]}
           status={getStatus("summary_agent")}
@@ -956,7 +934,7 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
       <div className="workflow-rewrite-container workflow-output-column">
         <StageWorkflowCard
           stage="rewrite_agent"
-          index={8}
+          index={7}
           isSelected={selectedStage === "rewrite_agent"}
           payload={displayPayloads["rewrite_agent"]}
           status={getStatus("rewrite_agent")}

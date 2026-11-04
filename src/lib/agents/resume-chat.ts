@@ -3,6 +3,7 @@ import { streamText } from "ai";
 import { getStructuredAgentTimeout, structuredAgentErrorMessage } from "@/lib/agents/base";
 import { createLanguageModel } from "@/lib/llm/model";
 import { extractResumeText } from "@/lib/resume/loader";
+import type { ChatMessage } from "@/lib/agents/chat-context";
 
 export type ParsedResumeMemory = {
   fileName: string;
@@ -24,29 +25,12 @@ export type ResumeAgentEvent =
   | { type: "done"; citation: string }
   | { type: "error"; message: string };
 
-/**
- * 当用户的问题与"修改简历"无关时，Agent 必须原样返回这句话。
- */
-const RESUME_EDIT_REFUSAL = "我无法完成非修改简历相关的内容";
-
-const RESUME_EDIT_SYSTEM_PROMPT = `你是一名专业的简历助手（Resume Assistant，简称 RA）。你的职责是基于用户上传的简历原文，回答简历内容问题，并帮助用户修改、优化、润色、重写简历。
-
-# 工作流程
-1. 系统已经在用户消息中提供【简历原文】和【用户问题】，你不需要也不能再调用工具。
-2. 先判断用户问题是否与这份简历的读取、理解、修改、新增、删除、优化有关。
-3. 如果用户只是询问简历里的事实信息，必须基于【简历原文】直接回答。
-4. 如果用户要求修改、优化、润色或重写，结合原文给出有针对性的修改结果与简要说明。
-
-# 严格的相关性约束（最重要）
-- 只要用户的问题与"简历"无关（例如闲聊、写代码、查天气、数学题、通用问答、与简历内容无关的请求等），你必须直接、逐字输出下面这句话，并且不要输出任何其他内容：
-${RESUME_EDIT_REFUSAL}
-
-# 输出要求（仅当与简历相关时）
-- 使用 Markdown 输出，结构清晰。
-- 内容问答要简洁准确，不要编造原文没有的信息。
-- 修改类请求要给出"修改后的内容"，并在结尾用要点列出本次主要改动与理由。
-- 修改类请求要突出岗位关键词、可量化成果与动词开头的成就句式。
-- 绝不能编造简历中不存在的经历、公司或数字。`;
+const RESUME_EDIT_SYSTEM_PROMPT = `你是 RA（Resume Assistant），一位友好、务实的对话助手，擅长简历优化、求职、面试准备和职业发展。
+以用户当前的问题为准，结合此前对话理解“继续”“刚才那版”等指代，并沿用用户已经补充的事实和偏好。
+简历和求职是你的主要帮助方向，也可以自然回答其他问题，无需因为偏离简历主题而拒绝。
+如果提供了简历原文，将其作为参考资料；区分原文事实、用户补充的信息与你的建议，不编造候选人的经历、公司或数字。
+没有简历时也可以正常交流，需要具体资料时再询问。
+按问题需要选择合适的篇幅和格式，可使用 Markdown；修改文本时优先给出可直接使用的内容，必要时简要说明理由。`;
 
 async function readResumePdf(options: {
   fileName: string;
@@ -79,10 +63,11 @@ export async function runResumeEditAgent(options: {
   fileBuffer: Buffer;
   prompt: string;
   parsedResume?: ParsedResumeMemory;
+  history?: ChatMessage[];
   onEvent: (event: ResumeAgentEvent) => void;
   abortSignal?: AbortSignal;
 }): Promise<void> {
-  const { fileName, fileBuffer, prompt, parsedResume, onEvent, abortSignal } = options;
+  const { fileName, fileBuffer, prompt, parsedResume, history = [], onEvent, abortSignal } = options;
 
   let parsedChars = 0;
   let answerStarted = false;
@@ -120,7 +105,7 @@ export async function runResumeEditAgent(options: {
     markReadingDone();
     const resume = parsedResume?.content
       ? parsedResume
-      : await (async () => {
+      : fileBuffer.length > 0 ? await (async () => {
           pdfReadStarted = true;
           onEvent({
             type: "step",
@@ -149,7 +134,7 @@ export async function runResumeEditAgent(options: {
           });
           onEvent({ type: "resume-cache", parsedResume: parsed });
           return parsed;
-        })();
+        })() : undefined;
 
     if (parsedResume?.content) {
       parsedChars = parsedResume.charCount || parsedResume.content.length;
@@ -166,11 +151,11 @@ export async function runResumeEditAgent(options: {
     const result = streamText({
       model: createLanguageModel(),
       system: RESUME_EDIT_SYSTEM_PROMPT,
-      prompt: [
-        `【用户问题】\n${prompt.trim()}`,
-        `【简历文件】\n${resume.fileName}`,
-        `【简历原文】\n${resume.content}`,
-      ].join("\n\n"),
+      messages: [
+        ...(resume ? [{ role: "user" as const, content: `【简历参考资料】\n文件：${resume.fileName}\n${resume.content}` }] : []),
+        ...history,
+        { role: "user", content: prompt.trim() },
+      ],
       abortSignal,
       timeout: getStructuredAgentTimeout(),
     });

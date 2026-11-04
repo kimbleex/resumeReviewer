@@ -1,3 +1,13 @@
+.agent-workspace-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.agent-workspace-container[hidden] {
+  display: none;
+}
+
 .pdf-agent-workbench {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

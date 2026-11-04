@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { invokeTextAgent } from "@/lib/agents/base";
+import { reviewerAgents } from "@/lib/agents/workflow/reviewers";
 import { runRewriteAgent } from "@/lib/agents/workflow/rewrite";
 import { runWithLlmConfig } from "@/lib/llm/model";
 import { buildReviewResumeState, tryReconstructReviewRunResult } from "@/lib/review/local-run-cache";
 import { runReviewPipeline } from "@/lib/review/pipeline";
-import { calculateReviewScoring, getReviewDisplayPayloads, scoringResponseSchema } from "@/lib/review/scoring";
+import { calculateReviewerScore, calculateSummaryScore, expertScoreSchema, getReviewDisplayPayloads } from "@/lib/review/scoring";
 import { resumeProfileSchema, type ReviewStageEvent, type ReviewCallCheckpoint } from "@/lib/review/schemas";
 import type { ReviewStageName } from "@/lib/review/stages";
 
@@ -50,16 +51,18 @@ function chatStream(text: string, finishReason = "stop") {
 }
 
 test("weighted scores are deterministic and incomplete scoring cannot become a checkpoint", () => {
-  const scores = calculateReviewScoring(scoreInput);
-  assert.equal(scores.reviewers.hr_agent.overallScore, 72);
-  assert.equal(scores.review.overallScore, 71);
-  assert.equal(scores.review.readyLevel, "promising");
-  assert.equal(scoringResponseSchema.safeParse({
-    ...scoreInput, hr_agent: { scoreBreakdown: scoreInput.hr_agent.scoreBreakdown.slice(1) },
-  }).success, false);
+  const reviewers = reviewerAgents.map(({ name }) => calculateReviewerScore(name, scoreInput[name]));
+  const review = calculateSummaryScore(reviewers);
+  assert.equal(reviewers[0].overallScore, 72);
+  assert.equal(review.overallScore, 71);
+  assert.equal(review.readyLevel, "promising");
+  assert.equal(expertScoreSchema.safeParse({ scoreBreakdown: scoreInput.hr_agent.scoreBreakdown.slice(1) }).success, false);
+  assert.throws(() => calculateSummaryScore(reviewers.slice(1)), /独立评审/);
 });
 
-test("real agent calls publish scores before advice, then resume without regenerating scores", async (t) => {
+test("reviewers publish independent score and advice checkpoints, then resume only unfinished calls", async (t) => {
+  const hrAssessmentStarted = deferred();
+  const releaseOtherScores = deferred();
   const adviceStarted = deferred();
   const releaseAdvice = deferred();
   const events: ReviewStageEvent[] = [];
@@ -72,20 +75,35 @@ test("real agent calls publish scores before advice, then resume without regener
     const body = JSON.parse(String(init.body));
     const name = body.response_format?.json_schema?.name ?? (JSON.stringify(body.messages).includes("[EXPLANATION]") ? "rewrite_explanation" : "rewrite_content");
     requests.push({ name, budget: body.max_tokens ?? body.max_completion_tokens, body: String(init.body) });
+    if (name.endsWith("_score")) {
+      const reviewer = name.slice(0, -"_score".length) as keyof typeof scoreInput;
+      assert.ok(reviewer in scoreInput);
+      assert.doesNotMatch(body.messages[0].content, /三个视角评分/);
+      if (reviewer !== "hr_agent") await releaseOtherScores.promise;
+      return chatStream(JSON.stringify(scoreInput[reviewer]));
+    }
     if (name.endsWith("_assessment")) {
+      if (name === "hr_agent_assessment") hrAssessmentStarted.resolve();
       adviceRequests++;
       if (adviceRequests === 3) adviceStarted.resolve();
       await releaseAdvice.promise;
       return chatStream(JSON.stringify({ reasoningSummary: advice.reasoningSummary, strengths: advice.strengths, concerns: advice.concerns }));
     }
     if (name.endsWith("_suggestions")) {
-      if (failAdvice) return chatStream('{"incomplete":', "length");
+      if (failAdvice && name === "hr_agent_suggestions") return chatStream('{"incomplete":', "length");
       return chatStream(JSON.stringify({ suggestions: advice.suggestions }));
     }
     if (name === "resume_parser") return chatStream(JSON.stringify(profile));
-    if (name === "scoring_agent") return chatStream(JSON.stringify(scoreInput));
     if (name === "summary_priorities") return chatStream(JSON.stringify({ executiveSummary: summary.executiveSummary, reasoningSummary: summary.reasoningSummary, topPriorities: summary.topPriorities }));
-    if (name === "summary_revisions") return chatStream(JSON.stringify({ sectionRevisions: summary.sectionRevisions }));
+    if (name === "summary_revisions") {
+      assert.equal((payloads.summary_agent as ReviewCallCheckpoint).checkpoint, "priorities");
+      assert.deepEqual(buildReviewResumeState({ stagePayloads: payloads, finalResult: null }).checkpoints?.summary_agent,
+        payloads.summary_agent, "summary priorities must be saved before requesting section revisions");
+      return chatStream(JSON.stringify({ sectionRevisions: summary.sectionRevisions }));
+    }
+    if (name === "rewrite_explanation") {
+      assert.equal((payloads.rewrite_agent as ReviewCallCheckpoint).checkpoint, "rewrite_content");
+    }
     return chatStream("[REWRITTEN_CONTENT]\n# Ada\n工程师\n[/REWRITTEN_CONTENT]\n[EXPLANATION]\n精简表达\n[/EXPLANATION]");
   });
   const input = { resumeFile: new File(["Ada 工程师"], "resume.txt"), targetJob: { title: "工程师", description: "" } };
@@ -94,28 +112,35 @@ test("real agent calls publish scores before advice, then resume without regener
     if (event.kind === "stage_completed" || event.kind === "stage_checkpoint") payloads[event.stage as ReviewStageName] = event.payload;
   };
   const firstRun = runWithLlmConfig(config, () => runReviewPipeline(input, handler));
-  // Attach the rejection handler immediately so a failed assertion cannot leave an unhandled rejection.
   const failedRun = assert.rejects(firstRun, /截断/);
   try {
-    await adviceStarted.promise;
-    assert.ok(payloads.scoring_agent);
-    assert.equal(payloads.hr_agent, undefined);
+    await hrAssessmentStarted.promise;
+    assert.equal((payloads.hr_agent as ReviewCallCheckpoint).checkpoint, "score");
+    assert.equal(payloads.interviewer_agent, undefined, "HR must display without waiting for other scores");
+    assert.equal(payloads.career_master_agent, undefined);
     assert.equal(payloads.summary_agent, undefined);
     const display = getReviewDisplayPayloads(payloads);
     assert.equal((display.hr_agent as { overallScore: number }).overallScore, 72);
-    assert.equal((display.summary_agent as { overallScore: number }).overallScore, 71);
+    assert.equal(display.summary_agent, undefined, "do not invent a combined score before all reviewers finish");
     const checkpoint = buildReviewResumeState({ stagePayloads: payloads, finalResult: null });
-    assert.ok(checkpoint.scoring);
+    assert.equal(checkpoint.checkpoints?.hr_agent?.checkpoint, "score");
     assert.equal(checkpoint.reviewerFeedback, undefined, "score previews must not masquerade as completed advice");
-    assert.ok(events.some((event) => event.stage === "scoring_agent" && event.callId && event.callLabel === "三视角评分"));
+    assert.ok(events.some((event) => event.stage === "hr_agent" && event.callId && event.callLabel === "HR / ATS · 评分"));
+    releaseOtherScores.resolve();
+    await adviceStarted.promise;
+    for (const stage of ["hr_agent", "interviewer_agent", "career_master_agent"] as const) {
+      assert.equal((payloads[stage] as ReviewCallCheckpoint).checkpoint, "score");
+    }
   } finally {
+    releaseOtherScores.resolve();
     releaseAdvice.resolve();
   }
   await failedRun;
   failAdvice = false;
   const checkpoint = buildReviewResumeState({ stagePayloads: payloads, finalResult: null });
   assert.equal(checkpoint.checkpoints?.hr_agent?.checkpoint, "assessment");
-  assert.equal(checkpoint.reviewerFeedback, undefined);
+  assert.ok(checkpoint.reviewerFeedback?.interviewer_agent, "successful sibling must survive a failed call");
+  assert.ok(checkpoint.reviewerFeedback?.career_master_agent);
   const result = await runWithLlmConfig(config, () => runReviewPipeline(input, handler, {}, { resumeState: checkpoint }));
   assert.equal(result.finalReview.overallScore, 71);
   assert.equal(result.reviewerFeedback[0].overallScore, 72);
@@ -123,14 +148,47 @@ test("real agent calls publish scores before advice, then resume without regener
   assert.equal(result.finalReview.sectionRevisions.length, 1);
   assert.match(result.rewrite?.rewrittenContent ?? "", /Ada/);
   assert.equal(requests.filter((request) => request.name === "resume_parser").length, 1);
-  assert.equal(requests.filter((request) => request.name === "scoring_agent").length, 1);
+  assert.equal(requests.filter((request) => request.name.endsWith("_score")).length, 3);
   assert.ok(requests.every((request) => request.budget === undefined), "application must not set output token limits");
   assert.equal(requests.filter((request) => request.name === "hr_agent_assessment").length, 1);
   assert.equal(requests.filter((request) => request.name === "hr_agent_suggestions").length, 2);
-  assert.ok(requests.filter((request) => request.name.startsWith("hr_agent")).every((request) => request.body.includes("72")));
+  assert.equal(requests.filter((request) => request.name === "interviewer_agent_suggestions").length, 1);
+  assert.ok(requests.filter((request) => /hr_agent_(assessment|suggestions)/.test(request.name)).every((request) => request.body.includes("72")));
   assert.ok(events.some((event) => event.details.some((detail) => detail.includes("输出 200 token"))));
   const callIds = new Set(events.filter((event) => event.phase === "requesting_model").map((event) => event.callId));
   assert.equal(callIds.size, requests.length);
+  assert.ok(events.every((event) => event.stage !== "scoring_agent"));
+});
+
+test("a score checkpoint resumes assessment without rescoring", async (t) => {
+  let checkpoint: ReviewCallCheckpoint | undefined;
+  const names: string[] = [];
+  let failAssessment = true;
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    const name = body.response_format.json_schema.name;
+    names.push(name);
+    if (name === "hr_agent_score") return chatStream(JSON.stringify(scoreInput.hr_agent));
+    if (name === "hr_agent_assessment") {
+      assert.equal(checkpoint?.checkpoint, "score");
+      return failAssessment ? chatStream('{"incomplete":', "length") : chatStream(JSON.stringify({
+        reasoningSummary: advice.reasoningSummary, strengths: advice.strengths, concerns: advice.concerns,
+      }));
+    }
+    assert.equal(checkpoint?.checkpoint, "assessment");
+    assert.deepEqual(getReviewDisplayPayloads({ hr_agent: checkpoint }).hr_agent, checkpoint.value);
+    return chatStream(JSON.stringify({ suggestions: advice.suggestions }));
+  });
+  const run = () => runWithLlmConfig(config, () => reviewerAgents[0].run(
+    profile, { title: "工程师", description: "" }, undefined, undefined, checkpoint,
+    (value) => { checkpoint = value; },
+  ));
+  await assert.rejects(run(), /截断/);
+  failAssessment = false;
+  const result = await run();
+  assert.equal(result.overallScore, 72);
+  assert.equal(result.suggestions.length, 1);
+  assert.deepEqual(names, ["hr_agent_score", "hr_agent_assessment", "hr_agent_assessment", "hr_agent_suggestions"]);
 });
 
 test("truncated rewrite is rejected instead of saved as a completed resume", async (t) => {
@@ -147,7 +205,7 @@ test("resume body is available before its explanation and survives an explanatio
   let checkpoint: ReviewCallCheckpoint | undefined;
   let bodyCalls = 0;
   let explanationCalls = 0;
-  const scoring = calculateReviewScoring(scoreInput);
+  const review = calculateSummaryScore(reviewerAgents.map(({ name }) => calculateReviewerScore(name, scoreInput[name])));
   t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
     const body = JSON.parse(String(init.body));
     if (JSON.stringify(body.messages).includes("[EXPLANATION]")) {
@@ -160,13 +218,13 @@ test("resume body is available before its explanation and survives an explanatio
   });
   const document = { path: "resume.txt", fileType: "txt", content: "Ada 工程师" };
   const run = () => runWithLlmConfig(config, () => runRewriteAgent(
-    document, scoring.review, { title: "工程师", description: "" },
+    document, review, { title: "工程师", description: "" },
     undefined, undefined, checkpoint, (value) => { checkpoint = value; },
   ));
   await assert.rejects(run(), /改写说明不完整/);
   const payloads = {
-    resume_loader: document, resume_parser: profile, scoring_agent: scoring,
-    summary_agent: scoring.review, rewrite_agent: checkpoint,
+    resume_loader: document, resume_parser: profile,
+    summary_agent: review, rewrite_agent: checkpoint,
   };
   assert.equal(buildReviewResumeState({ stagePayloads: payloads, finalResult: null }).rewrite, undefined);
   assert.equal(tryReconstructReviewRunResult({

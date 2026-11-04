@@ -1,4 +1,5 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
+import { runScoringAgent } from "@/lib/agents/workflow/scoring";
 import {
   buildCareerMasterPrompt,
   buildHrPrompt,
@@ -25,7 +26,6 @@ export type ReviewerAgent = {
     targetJob: TargetJob,
     onProgress?: (event: StructuredAgentProgress) => void,
     abortSignal?: AbortSignal,
-    scoring?: ReviewerFeedback,
     checkpoint?: ReviewCallCheckpoint,
     onCheckpoint?: (checkpoint: ReviewCallCheckpoint) => void,
   ) => Promise<ReviewerFeedback>;
@@ -40,8 +40,12 @@ function createReviewer(options: {
   return {
     name: options.name,
     perspective: options.perspective,
-    async run(profile, targetJob, onProgress, abortSignal, scoring, checkpoint, onCheckpoint) {
-      if (!scoring) throw new Error("请先完成三视角评分。");
+    async run(profile, targetJob, onProgress, abortSignal, checkpoint, onCheckpoint) {
+      const scoring = checkpoint?.checkpoint === "score" || checkpoint?.checkpoint === "assessment"
+        ? checkpoint.value
+        : await runScoringAgent(options.name, options.perspective, profile, targetJob, onProgress, abortSignal);
+      if (abortSignal?.aborted) throw new Error("诊断已被中断。");
+      if (checkpoint?.checkpoint !== "assessment") onCheckpoint?.({ checkpoint: "score", value: scoring });
       const context = `${formatTargetJobContext(targetJob)}
 候选人画像：${dumpJson(profile)}
 本视角评分（保持不变）：${dumpJson(scoring)}`;

@@ -1,6 +1,6 @@
 {
   "name": "resume-mutil-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "packageManager": "pnpm@11.24.0",
   "engines": {
@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "docker": "node scripts/docker.mjs",
     "start": "next start",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
@@ -17,7 +18,6 @@
     "@ai-sdk/anthropic": "^3.0.137",
     "@ai-sdk/openai": "^3.0.66",
     "ai": "^6.0.193",
-    "html2pdf.js": "^0.14.0",
     "lucide-react": "^0.552.0",
     "mammoth": "^1.10.0",
     "next": "^16.4.3",
@@ -30,6 +30,7 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "fake-indexeddb": "^6.2.7",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

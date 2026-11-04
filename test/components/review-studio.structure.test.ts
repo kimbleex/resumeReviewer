@@ -35,6 +35,16 @@ test("workflow is title-free", () => {
   assert.doesNotMatch(source, /评审链路流程/);
 });
 
+test("workflow keeps the original cards and branches directly from parser to reviewers", () => {
+  assert.doesNotMatch(source, /scoring_agent|workflow-scoring-container/);
+  assert.match(source, /isParserDone=\{getStatus\("resume_parser"\) === "done"\}/);
+  assert.match(cssRule(".workflow-parser-container"), /grid-row:\s*3/);
+  const timeline = readSource("src/components/workflow-timeline.tsx");
+  assert.deepEqual([...timeline.matchAll(/<StageWorkflowCard\s+stage="([^"]+)"/g)].map((match) => match[1]), [
+    "resume_loader", "resume_parser", "hr_agent", "interviewer_agent", "career_master_agent", "summary_agent", "rewrite_agent",
+  ]);
+});
+
 test("workflow cards use a text-first layout without left icon slots", () => {
   assert.doesNotMatch(source, /className="workflow-node-icon/);
   assert.match(source, /workflow-node-content/);
@@ -96,13 +106,14 @@ test("agent reports use a clean summary-first layout instead of dense legacy rep
   assert.match(cleanShellRule, /background:\s*transparent/);
 });
 
-test("rewrite PDF export applies visual resume templates instead of one fixed PDF style", () => {
-  assert.match(source, /detectPdfTemplate/);
-  assert.match(source, /getPdfTemplateStyles/);
-  assert.match(source, /pdf-template-engineering/);
-  assert.match(source, /pdf-template-business/);
-  assert.match(source, /pdf-template-transition/);
-  assert.match(source, /pdf-template-early/);
+test("rewrite offers Markdown download without mounting a full preview or PDF exporter", () => {
+  assert.doesNotMatch(source, /html2pdf|handleDownloadPdf|detectPdfTemplate/);
+  assert.match(source, /下载 Markdown \(.md\)/);
+  assert.match(source, /title="查看 Markdown 正文" defaultExpanded=\{false\}/);
+  assert.match(source, /URL\.revokeObjectURL/);
+  assert.match(source, /selectedStage === "rewrite_agent" \? finalResult\?\.rewrite/);
+  assert.match(source, /persistStreamResult\(chunk\.result\)/);
+  assert.match(source, /window\.addEventListener\("pagehide"/);
 });
 
 test("live agent console never stores or renders raw model output text", () => {

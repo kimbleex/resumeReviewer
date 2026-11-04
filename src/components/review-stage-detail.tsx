@@ -14,7 +14,6 @@ import {
   FolderGit2,
   Globe,
   GraduationCap,
-  LoaderCircle,
   Mail,
   MapPin,
   Phone,
@@ -40,7 +39,7 @@ import {
 
 import { FinalReviewPanel, ReviewerResultPanel, RubricReference } from "@/components/review-report-panels";
 import { rubricForStage, type ReviewerRubricName } from "@/lib/review/rubrics";
-import { getReviewDisplayPayloads, reviewScoringSchema } from "@/lib/review/scoring";
+import { getReviewDisplayPayloads } from "@/lib/review/scoring";
 
 const REVIEWER_STAGES: ReviewerRubricName[] = ["hr_agent", "interviewer_agent", "career_master_agent"];
 import {
@@ -535,402 +534,62 @@ function EmptyResultPanel({ title, detail }: { title: string; detail: string }) 
   );
 }
 
-type PdfTemplate = "engineering" | "business" | "transition" | "early";
-
-function RewriteResultPanel({
+const RewriteResultPanel = memo(function RewriteResultPanel({
   payload,
   finalResult,
 }: {
   payload: unknown;
   finalResult: ReviewRunResult | null;
 }) {
-  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
-  const rewriteData = resumeRewriteSchema.safeParse(payload || finalResult?.rewrite);
-
-  if (!rewriteData.success) {
-    return (
-      <EmptyResultPanel
-        title="简历重写数据不可用"
-        detail="简历重写仍在处理中或格式不正确。请耐心等待智能协同重写优化完成。"
-      />
-    );
+  const rewriteData = useMemo(() => resumeRewriteSchema.safeParse(payload || finalResult?.rewrite), [payload, finalResult?.rewrite]);
+  if (!rewriteData.success || !rewriteData.data.rewrittenContent) {
+    return <EmptyResultPanel title="Markdown 简历生成中" detail="正文完成后即可下载，无需等待改写说明。刷新后可从本地断点继续。" />;
   }
-
   const { rewrittenContent, explanation } = rewriteData.data;
-
-  // Retrieve candidate name from finalResult profile
   const candidateName = finalResult?.profile?.candidateName || "候选人";
-  const downloadFileName = `${candidateName}_优化后全新简历.md`;
-
-  const detectPdfTemplate = (content: string, note: string): PdfTemplate => {
-    const sourceText = `${note}\n${content}`.toLowerCase();
-    if (/早期职业潜力模板|应届|实习|校园|奖项|课程|early/.test(sourceText)) {
-      return "early";
-    }
-    if (/职业转型桥接模板|转型|rpa|自动化|迁移|桥接|transition/.test(sourceText)) {
-      return "transition";
-    }
-    if (/业务增长结果模板|增长|运营|产品|销售|商业化|客户成功|项目管理|business/.test(sourceText)) {
-      return "business";
-    }
-    return "engineering";
-  };
-
-  const getPdfTemplateLabel = (template: PdfTemplate): string => {
-    switch (template) {
-      case "business":
-        return "业务增长结果 PDF";
-      case "transition":
-        return "职业转型桥接 PDF";
-      case "early":
-        return "早期职业潜力 PDF";
-      case "engineering":
-      default:
-        return "工程技术深度 PDF";
-    }
-  };
-
-  const getPdfTemplateStyles = (template: PdfTemplate): string => {
-    const accent =
-      template === "business"
-        ? "#2563eb"
-        : template === "transition"
-          ? "#7c3aed"
-          : template === "early"
-            ? "#0f766e"
-            : "#0f172a";
-    const mutedAccent =
-      template === "business"
-        ? "#dbeafe"
-        : template === "transition"
-          ? "#ede9fe"
-          : template === "early"
-            ? "#ccfbf1"
-            : "#e2e8f0";
-
-    return `
-      .pdf-resume-wrapper {
-        --pdf-accent: ${accent};
-        --pdf-accent-soft: ${mutedAccent};
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: #182033;
-        line-height: 1.48;
-        padding: 9px 20px;
-        background: #ffffff;
-      }
-      .pdf-resume-wrapper * {
-        box-sizing: border-box;
-      }
-      h1.pdf-name {
-        font-size: 22px;
-        font-weight: 780;
-        color: #0f172a;
-        margin: 0 0 5px;
-        padding-bottom: 7px;
-        border-bottom: 2px solid var(--pdf-accent);
-        letter-spacing: 0;
-      }
-      h2.pdf-section-title {
-        font-size: 12.5px;
-        font-weight: 780;
-        color: var(--pdf-accent);
-        margin: 13px 0 6px;
-        padding: 0 0 3px;
-        border-bottom: 1px solid #d7dde8;
-        letter-spacing: 0;
-      }
-      h3.pdf-subsection-title {
-        font-size: 11.4px;
-        font-weight: 720;
-        color: #111827;
-        margin: 8px 0 3px;
-      }
-      p {
-        font-size: 10.8px;
-        margin: 0 0 5px;
-        color: #334155;
-      }
-      ul {
-        margin: 0 0 6px;
-        padding-left: 15px;
-      }
-      li {
-        font-size: 10.7px;
-        color: #334155;
-        margin-bottom: 2.4px;
-        padding-left: 1px;
-      }
-      li::marker {
-        color: var(--pdf-accent);
-      }
-      strong {
-        color: #0f172a;
-        font-weight: 700;
-      }
-      .pdf-template-engineering h2.pdf-section-title {
-        text-transform: uppercase;
-        font-size: 11.8px;
-        border-bottom: 1.5px solid var(--pdf-accent);
-      }
-      .pdf-template-business h1.pdf-name {
-        border-bottom: 0;
-        padding-bottom: 4px;
-      }
-      .pdf-template-business h2.pdf-section-title {
-        padding: 4px 8px;
-        border: 0;
-        border-left: 4px solid var(--pdf-accent);
-        background: var(--pdf-accent-soft);
-        color: #1e3a8a;
-      }
-      .pdf-template-transition h1.pdf-name {
-        text-align: left;
-        border-bottom-style: double;
-      }
-      .pdf-template-transition h2.pdf-section-title {
-        border-bottom: 0;
-        border-left: 3px solid var(--pdf-accent);
-        padding-left: 7px;
-      }
-      .pdf-template-early h1.pdf-name {
-        text-align: center;
-        border-bottom: 1.5px solid var(--pdf-accent);
-      }
-      .pdf-template-early h2.pdf-section-title {
-        color: #115e59;
-        border-bottom: 1px solid var(--pdf-accent-soft);
-      }
-    `;
-  };
-
-  const pdfTemplate = detectPdfTemplate(rewrittenContent, explanation);
-  const pdfTemplateLabel = getPdfTemplateLabel(pdfTemplate);
-
-  const parseMarkdownToHtml = (markdown: string): string => {
-    let html = markdown
-      .replace(/\r\n/g, "\n")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-
-    // Headers
-    html = html.replace(/^# (.*$)/gim, '<h1 class="pdf-name">$1</h1>');
-    html = html.replace(/^## (.*$)/gim, '<h2 class="pdf-section-title">$1</h2>');
-    html = html.replace(/^### (.*$)/gim, '<h3 class="pdf-subsection-title">$1</h3>');
-
-    // Bold text
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-    // Split into lines to manage lists and paragraphs
-    const lines = html.split("\n");
-    let inList = false;
-    const processedLines: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) {
-        if (inList) {
-          processedLines.push("</ul>");
-          inList = false;
-        }
-        continue;
-      }
-
-      const listMatch = line.match(/^[-*]\s+(.*)$/);
-      if (listMatch) {
-        if (!inList) {
-          processedLines.push("<ul>");
-          inList = true;
-        }
-        processedLines.push(`<li>${listMatch[1]}</li>`);
-      } else {
-        if (inList) {
-          processedLines.push("</ul>");
-          inList = false;
-        }
-
-        if (line.startsWith("<h") || line.startsWith("<ul") || line.startsWith("<li")) {
-          processedLines.push(line);
-        } else {
-          processedLines.push(`<p>${line}</p>`);
-        }
-      }
-    }
-
-    if (inList) {
-      processedLines.push("</ul>");
-    }
-
-    return processedLines.join("\n");
-  };
-
   const handleDownload = () => {
-    if (!rewrittenContent) return;
-    const blob = new Blob([rewrittenContent], { type: "text/markdown;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([rewrittenContent], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", downloadFileName);
+    link.download = `${candidateName}_优化后全新简历.md`;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDownloadPdf = async () => {
-    if (!rewrittenContent) return;
-    setIsDownloadingPdf(true);
-
-    try {
-      // Dynamically import html2pdf on the client side only
-      // @ts-ignore
-      const html2pdf = (await import("html2pdf.js")).default;
-
-      const htmlContent = parseMarkdownToHtml(rewrittenContent);
-
-      const container = document.createElement("div");
-      container.innerHTML = `
-        <style>
-          ${getPdfTemplateStyles(pdfTemplate)}
-        </style>
-        <div class="pdf-resume-wrapper pdf-template-${pdfTemplate}">
-          ${htmlContent}
-        </div>
-      `;
-
-      const options = {
-        margin: 15,
-        filename: `${candidateName}_优化后全新简历.pdf`,
-        image: { type: "jpeg" as const, quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: "mm" as const, format: "a4" as const, orientation: "portrait" as const }
-      };
-
-      await html2pdf().from(container).set(options).save();
-    } catch (error) {
-      console.error("PDF download failed:", error);
-      alert("PDF 下载失败，请重新尝试。");
-    } finally {
-      setIsDownloadingPdf(false);
-    }
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
     <section className="result-stack summary-result-stack">
-      {/* 1. Optimizer Header Banner */}
-      <header className="summary-report-header" style={{ marginBottom: "1.5rem" }}>
+      <header className="summary-report-header">
         <div className="summary-report-title">
-          <div className="summary-title-badge">
-            <Sparkles size={12} />
-            <span>{explanation ? "AI 协同智能改写已完成" : "正文已就绪，改写说明生成中"}</span>
-          </div>
-          <div className="summary-title-badge">
-            <FileText size={12} />
-            <span>{pdfTemplateLabel}</span>
-          </div>
+          <div className="summary-title-badge"><FileText size={12} /><span>Markdown 简历</span></div>
           <h2>智能协同优化重写简历</h2>
           <p className="summary-report-desc">
-            整合 HR、技术面试官及职业规划大师的终审修改建议，已为您深度重构并润色简历文本
+            正文已就绪，可直接下载。{explanation ? "改写说明已生成。" : "改写说明尚未完成，不影响下载。"}
           </p>
         </div>
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-          <button
-            onClick={handleDownload}
-            disabled={!rewrittenContent || isDownloadingPdf}
-            className="download-resume-btn-secondary"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              background: "rgba(255, 255, 255, 0.03)",
-              color: isDownloadingPdf ? "#64748b" : "#e2e8f0",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              borderRadius: "8px",
-              padding: "0.6rem 1.2rem",
-              fontSize: "0.875rem",
-              fontWeight: "600",
-              cursor: isDownloadingPdf ? "not-allowed" : "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            <Download size={15} />
-            <span>下载 Markdown (.md)</span>
-          </button>
-          <button
-            onClick={handleDownloadPdf}
-            disabled={!rewrittenContent || isDownloadingPdf}
-            className="download-resume-btn"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              background: isDownloadingPdf
-                ? "rgba(255, 255, 255, 0.05)"
-                : "linear-gradient(135deg, #06b6d4, #0891b2)",
-              color: isDownloadingPdf ? "#94a3b8" : "#ffffff",
-              border: isDownloadingPdf ? "1px solid rgba(255, 255, 255, 0.05)" : "none",
-              borderRadius: "8px",
-              padding: "0.6rem 1.2rem",
-              fontSize: "0.875rem",
-              fontWeight: "600",
-              cursor: isDownloadingPdf ? "not-allowed" : "pointer",
-              boxShadow: isDownloadingPdf ? "none" : "0 4px 14px rgba(6, 182, 212, 0.3)",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {isDownloadingPdf ? (
-              <LoaderCircle className="spin-icon" size={13} />
-            ) : (
-              <Sparkles size={13} />
-            )}
-            <span>{isDownloadingPdf ? "正在生成 PDF 简历..." : "导出为 PDF 格式"}</span>
-          </button>
-        </div>
+        <button type="button" onClick={handleDownload} className="rewrite-markdown-download">
+          <Download size={15} /><span>下载 Markdown (.md)</span>
+        </button>
       </header>
-
-      {/* 2. Explanation Box */}
       {explanation && (
-        <div
-          className="summary-executive-box"
-          style={{
-            marginBottom: "1.5rem",
-            borderLeft: "4px solid #06b6d4",
-            background: "rgba(6, 182, 212, 0.03)",
-          }}
-        >
-          <h4 style={{ color: "#06b6d4", margin: "0 0 0.5rem 0", fontSize: "0.95rem", fontWeight: "600" }}>
-            本次重写优化要点说明
-          </h4>
-          <p className="summary-copy" style={{ margin: 0, fontSize: "0.875rem", lineHeight: "1.6" }}>
-            {explanation}
-          </p>
-        </div>
+        <section className="summary-executive-box">
+          <h4>本次重写优化要点说明</h4>
+          <p className="summary-copy">{explanation}</p>
+        </section>
       )}
-
-      {/* 3. Rewritten Content Preview */}
-      <CollapsibleSection title="全新简历实时预览 (标准 Markdown 格式)" defaultExpanded={true}>
-        <div
-          className="markdown-preview-container"
-          style={{
-            background: "#12141a",
-            border: "1px solid rgba(255, 255, 255, 0.05)",
-            borderRadius: "8px",
-            padding: "1.5rem",
-            maxHeight: "650px",
-            overflowY: "auto",
-            fontFamily: "'Courier New', Courier, monospace, sans-serif",
-            fontSize: "0.875rem",
-            lineHeight: "1.7",
-            color: "#e2e8f0",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-          }}
-        >
-          {rewrittenContent || "正在装载简历内容..."}
-        </div>
+      <CollapsibleSection title="查看 Markdown 正文" defaultExpanded={false}>
+        <textarea
+          className="rewrite-markdown-preview"
+          aria-label="优化后的 Markdown 简历正文"
+          readOnly
+          spellCheck={false}
+          value={rewrittenContent}
+        />
       </CollapsibleSection>
     </section>
   );
-}
+});
 
 const StageResultContent = memo(function StageResultContent({
   finalResult,
@@ -943,7 +602,7 @@ const StageResultContent = memo(function StageResultContent({
   reviewers: Partial<Record<ReviewerRubricName, ReviewerFeedback>>;
   stage: StageName;
 }) {
-  if (!payload && !(stage === "summary_agent" && finalResult)) {
+  if (!payload && !((stage === "summary_agent" || stage === "rewrite_agent") && finalResult)) {
     const rubric = rubricForStage(stage);
     return (
       <>
@@ -969,13 +628,6 @@ const StageResultContent = memo(function StageResultContent({
   if (stage === "resume_loader") {
     return <LoaderResultPanel payload={payload} />;
   }
-  if (stage === "scoring_agent") {
-    const parsed = reviewScoringSchema.safeParse(payload);
-    return parsed.success ? (
-      <FinalReviewPanel review={parsed.data.review} reviewers={parsed.data.reviewers} />
-    ) : <EmptyResultPanel title="评分生成中" detail="评分完成后立即展示，无需等待建议和改写。" />;
-  }
-
   if (stage === "resume_parser") {
     const parsed = resumeProfileSchema.safeParse(payload);
     return parsed.success ? (
@@ -1039,8 +691,8 @@ function ResultExplorer({
   const Icon = meta.icon;
   const liveState = stageStreams[selectedStage] ?? EMPTY_STAGE_LIVE_STATE;
   const status = stageStatus[selectedStage];
-  const displayPayloads = getReviewDisplayPayloads(stagePayloads);
-  const payload = displayPayloads[selectedStage];
+  const displayPayloads = useMemo(() => getReviewDisplayPayloads(stagePayloads), [stagePayloads]);
+  const payload = displayPayloads[selectedStage] ?? (selectedStage === "rewrite_agent" ? finalResult?.rewrite : undefined);
   const hasPartialResult = Boolean(getReviewCallCheckpoint(stagePayloads[selectedStage]));
   const [activeDetailTab, setActiveDetailTab] = useState<"logs" | "report">(payload ? "report" : "logs");
   const logCount = liveState.logs?.length ?? 0;
@@ -1096,7 +748,7 @@ function ResultExplorer({
             <FileText size={14} />
             <span>诊断报告</span>
             <span className={`node-detail-tab-status ${payload ? "is-ready" : ""}`}>
-              {payload ? (hasPartialResult ? "部分已生成" : stagePayloads[selectedStage] ? "已生成" : "评分已出") : "等待中"}
+              {payload ? (hasPartialResult ? "部分已生成" : "已生成") : "等待中"}
             </span>
           </button>
         </div>
@@ -1119,7 +771,7 @@ function ResultExplorer({
                 </span>
                 <span className="console-header-right">
                   <span className="console-log-count">
-                    {payload ? (hasPartialResult ? "已展示当前结果，后续内容继续生成" : stagePayloads[selectedStage] ? "已生成结构化结果" : "评分已出，建议将陆续展示") : "等待数据载入"}
+                    {payload ? (hasPartialResult ? "已展示当前结果，后续内容继续生成" : "已生成结构化结果") : "等待数据载入"}
                   </span>
                 </span>
               </div>
@@ -1127,7 +779,7 @@ function ResultExplorer({
               <div className="live-console-body node-report-body">
                 <div className="structured-panel-wrapper node-report-structured-wrapper">
                   <StageResultContent
-                    finalResult={selectedStage === "summary_agent" ? finalResult : null}
+                    finalResult={selectedStage === "summary_agent" || selectedStage === "rewrite_agent" ? finalResult : null}
                     payload={payload}
                     reviewers={reviewers}
                     stage={selectedStage}

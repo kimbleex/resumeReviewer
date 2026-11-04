@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import type { ParsedResumeMemory, ResumeAgentEvent } from "@/lib/agents/resume-chat";
+import { buildChatHistory } from "@/lib/agents/chat-context";
 import { appendLlmConfigToFormData } from "@/lib/llm/config";
 import { readRequiredLlmConfig } from "@/lib/llm/storage";
 
@@ -169,6 +170,7 @@ export function PdfAgentWorkbench() {
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       abortRef.current?.abort();
@@ -203,7 +205,7 @@ export function PdfAgentWorkbench() {
 
   const promptPlaceholder = useMemo(() => {
     if (!isAgentRunning) {
-      return "输入简历修改要求";
+      return "输入问题，或继续刚才的对话";
     }
 
     const latestTurn = turns[turns.length - 1];
@@ -228,6 +230,9 @@ export function PdfAgentWorkbench() {
       setAgentError("请上传 PDF 文件。");
       return;
     }
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsAgentRunning(false);
 
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
@@ -256,27 +261,22 @@ export function PdfAgentWorkbench() {
   }, [pdfPreviewUrl]);
 
   const handleClearAgent = useCallback(() => {
-    if (isAgentRunning) {
-      return;
-    }
-
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsAgentRunning(false);
     setAgentError("");
     setPrompt("");
     setTurns([]);
     requestAnimationFrame(resizePromptTextarea);
-  }, [isAgentRunning, resizePromptTextarea]);
+  }, [resizePromptTextarea]);
 
   const handleSendPrompt = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
       const trimmedPrompt = prompt.trim();
-      if (!pdfPreviewUrl || !pdfFile) {
-        setAgentError("请先上传 PDF 文件。");
-        return;
-      }
       if (!trimmedPrompt) {
-        setAgentError("请输入你希望 Agent 修改的内容。");
+        setAgentError("请输入你想讨论的问题。");
         return;
       }
       if (isAgentRunning) {
@@ -318,7 +318,7 @@ export function PdfAgentWorkbench() {
       abortRef.current = controller;
 
       const applyEvent = (eventPayload: ResumeAgentEvent) => {
-        if (!isMountedRef.current) {
+        if (!isMountedRef.current || controller.signal.aborted || abortRef.current !== controller) {
           return;
         }
         if (eventPayload.type === "resume-cache") {
@@ -376,12 +376,13 @@ export function PdfAgentWorkbench() {
       try {
         const formData = new FormData();
         formData.append("prompt", trimmedPrompt);
+        formData.append("history", JSON.stringify(buildChatHistory(turns)));
         appendLlmConfigToFormData(formData, llmConfigCheck.config);
-        if (parsedResumeCache && parsedResumeCache.fileName === pdfFile.name) {
+        if (parsedResumeCache && parsedResumeCache.fileName === pdfFile?.name) {
           formData.append("parsedResumeFileName", parsedResumeCache.fileName);
           formData.append("parsedResumeCharCount", String(parsedResumeCache.charCount));
           formData.append("parsedResumeContent", parsedResumeCache.content);
-        } else {
+        } else if (pdfFile) {
           formData.append("pdfFile", pdfFile);
         }
 
@@ -398,31 +399,30 @@ export function PdfAgentWorkbench() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let receivedTerminalEvent = false;
+        const consumeLine = (line: string) => {
+          if (!line.trim()) return;
+          const eventPayload = JSON.parse(line) as ResumeAgentEvent;
+          if (eventPayload.type === "done" || eventPayload.type === "error") receivedTerminalEvent = true;
+          applyEvent(eventPayload);
+        };
 
         for (;;) {
           const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
           let newlineIndex = buffer.indexOf("\n");
           while (newlineIndex >= 0) {
             const line = buffer.slice(0, newlineIndex).trim();
             buffer = buffer.slice(newlineIndex + 1);
-            if (line) {
-              try {
-                applyEvent(JSON.parse(line) as ResumeAgentEvent);
-              } catch {
-                // 跳过无法解析的行，保持流式继续。
-              }
-            }
+            consumeLine(line);
             newlineIndex = buffer.indexOf("\n");
           }
+          if (done) {
+            consumeLine(buffer);
+            break;
+          }
         }
-
-        if (isMountedRef.current) {
-          updateTurn(turnId, (turn) => (turn.status === "running" ? { ...turn, status: "done" } : turn));
-        }
+        if (!receivedTerminalEvent && !controller.signal.aborted) throw new Error("对话连接提前关闭，请重新发送。未完成的回答不会加入上下文。");
       } catch (error) {
         if (!isMountedRef.current || controller.signal.aborted) {
           return;
@@ -433,13 +433,11 @@ export function PdfAgentWorkbench() {
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
-        }
-        if (isMountedRef.current) {
-          setIsAgentRunning(false);
+          if (isMountedRef.current) setIsAgentRunning(false);
         }
       }
     },
-    [isAgentRunning, parsedResumeCache, pdfFile, pdfPreviewUrl, prompt, updateTurn],
+    [isAgentRunning, parsedResumeCache, pdfFile, prompt, turns, updateTurn],
   );
 
   return (
@@ -510,7 +508,7 @@ export function PdfAgentWorkbench() {
             </div>
             <p>Resume Assistant Agent</p>
           </div>
-          <button type="button" className="agent-clear-button" onClick={handleClearAgent} disabled={isAgentRunning}>
+          <button type="button" className="agent-clear-button" onClick={handleClearAgent} title="清空对话和上下文，保留已上传的简历">
             清空
           </button>
         </div>
@@ -526,7 +524,7 @@ export function PdfAgentWorkbench() {
           {turns.length === 0 && !agentError ? (
             <div className="agent-empty-hint">
               <Bot size={26} />
-              <strong>告诉 RA 你想怎么改这份简历</strong>
+              <strong>和 RA 聊聊你的问题，也可以上传简历一起讨论</strong>
             </div>
           ) : null}
 
@@ -547,7 +545,7 @@ export function PdfAgentWorkbench() {
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              aria-label="输入简历修改要求"
+              aria-label="输入问题或简历修改要求"
               placeholder={promptPlaceholder}
               rows={1}
               disabled={isAgentRunning}

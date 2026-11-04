@@ -7,7 +7,6 @@ import {
 } from "@/lib/review/schemas";
 import { REVIEWER_RUBRICS, SUMMARY_RUBRIC, applyRubricWeights, scoreBand, type RubricDimension } from "@/lib/review/rubrics";
 import { formatReadyLevel, scoreLevel, type StageName } from "@/components/review-studio-shared";
-import { reviewScoringSchema } from "@/lib/review/scoring";
 
 type Stat = { label: string; value: string };
 
@@ -119,19 +118,6 @@ function ReviewerInsight({ stage, payload }: { stage: keyof typeof REVIEWER_RUBR
 }
 
 export function WorkflowNodeInsight({ stage, payload }: { stage: StageName; payload: unknown }) {
-  if (stage === "scoring_agent") {
-    const parsed = reviewScoringSchema.safeParse(payload);
-    return parsed.success ? (
-      <span className="workflow-node-insight" aria-live="polite">
-        <ScoreLine score={parsed.data.review.overallScore} note="评分已就绪 · 建议陆续生成" />
-        <StatRow stats={[
-          { label: "HR · 35%", value: String(parsed.data.reviewers.hr_agent.overallScore) },
-          { label: "面试 · 35%", value: String(parsed.data.reviewers.interviewer_agent.overallScore) },
-          { label: "定位 · 30%", value: String(parsed.data.reviewers.career_master_agent.overallScore) },
-        ]} />
-      </span>
-    ) : <Caption>先出三视角评分，再逐步补充建议</Caption>;
-  }
   if (stage === "hr_agent" || stage === "interviewer_agent" || stage === "career_master_agent") {
     return <ReviewerInsight stage={stage} payload={payload} />;
   }

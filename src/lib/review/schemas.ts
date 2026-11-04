@@ -697,6 +697,7 @@ export type ResumeRewrite = z.infer<typeof resumeRewriteSchema>;
 
 // A partial business result is displayable and resumable, but not a completed stage.
 export const reviewCallCheckpointSchema = z.discriminatedUnion("checkpoint", [
+  z.object({ checkpoint: z.literal("score"), value: reviewerFeedbackSchema }),
   z.object({ checkpoint: z.literal("assessment"), value: reviewerFeedbackSchema }),
   z.object({ checkpoint: z.literal("priorities"), value: finalResumeReviewSchema }),
   z.object({ checkpoint: z.literal("rewrite_content"), value: resumeRewriteSchema }),

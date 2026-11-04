@@ -5,11 +5,11 @@ import { ArrowRight, Sparkles } from "lucide-react";
 
 import { ReviewStudio } from "@/components/review-studio";
 
-export function EntryGateway() {
+export function EntryGateway({ agentChatEnabled }: { agentChatEnabled: boolean }) {
   const [hasEntered, setHasEntered] = useState(false);
 
   if (hasEntered) {
-    return <ReviewStudio />;
+    return <ReviewStudio agentChatEnabled={agentChatEnabled} />;
   }
 
   return (

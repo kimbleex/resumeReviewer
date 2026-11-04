@@ -27,6 +27,19 @@ const DB_VERSION = 1;
 const STORE_NAME = "runs";
 // 无登录体系后只保留当前浏览器的一份断点记录。
 const LOCAL_OWNER_KEY = "local";
+const RECOVERY_KEY = "resume-review-recovery-v1";
+let pendingWrite: Promise<unknown> = Promise.resolve();
+
+function readRecoverySnapshot(): LocalReviewRunSnapshot | null {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(RECOVERY_KEY) : null;
+    const snapshot = raw ? JSON.parse(raw) : null;
+    return snapshot && typeof snapshot.runId === "string" && typeof snapshot.updatedAt === "number" &&
+      snapshot.stagePayloads && snapshot.stageStatus ? snapshot as LocalReviewRunSnapshot : null;
+  } catch {
+    return null;
+  }
+}
 
 function replaceRunningStages(
   stageStatus: Record<ReviewStageName, ReviewStageStatus>,
@@ -69,9 +82,6 @@ export function buildReviewResumeState(options: {
   }
   if (completedPayloads.resume_parser) {
     resumeState.profile = completedPayloads.resume_parser as ReviewPipelineResumeState["profile"];
-  }
-  if (completedPayloads.scoring_agent) {
-    resumeState.scoring = completedPayloads.scoring_agent as ReviewPipelineResumeState["scoring"];
   }
   if (completedPayloads.hr_agent) {
     reviewerFeedback.hr_agent = completedPayloads.hr_agent as NonNullable<ReviewPipelineResumeState["reviewerFeedback"]>["hr_agent"];
@@ -176,11 +186,15 @@ function runStoreTransaction<T>(mode: IDBTransactionMode, callback: (store: IDBO
       new Promise<T>((resolve, reject) => {
         const transaction = db.transaction(STORE_NAME, mode);
         const request = callback(transaction.objectStore(STORE_NAME));
+        let result: T;
 
         request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        transaction.oncomplete = () => db.close();
-        transaction.onerror = () => {
+        request.onsuccess = () => { result = request.result; };
+        transaction.oncomplete = () => {
+          db.close();
+          resolve(result);
+        };
+        transaction.onerror = transaction.onabort = () => {
           db.close();
           reject(transaction.error);
         };
@@ -189,24 +203,40 @@ function runStoreTransaction<T>(mode: IDBTransactionMode, callback: (store: IDBO
 }
 
 export async function saveLocalReviewRun(snapshot: LocalReviewRunSnapshot): Promise<void> {
+  // Synchronous recovery copy closes the refresh window before an IndexedDB commit.
+  let recoverySaved = false;
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(RECOVERY_KEY, JSON.stringify(snapshot));
+      recoverySaved = true;
+    }
+  } catch {
+    // IndexedDB can still save a snapshot when localStorage is full or disabled.
+  }
   if (!canUseIndexedDb()) {
+    if (!recoverySaved) throw new Error("无法保存本地断点，请先下载已生成的 Markdown。");
     return;
   }
 
-  await runStoreTransaction("readwrite", (store) =>
-    store.put({
-      ...snapshot,
-      ownerKey: LOCAL_OWNER_KEY,
-      updatedAt: Date.now(),
-    }),
+  // Preserve event order even if separate database opens complete out of order.
+  const write = pendingWrite.catch(() => undefined).then(() =>
+    runStoreTransaction("readwrite", (store) => store.put({ ...snapshot, ownerKey: LOCAL_OWNER_KEY })),
   );
+  pendingWrite = write;
+  try {
+    await write;
+  } catch (error) {
+    if (!recoverySaved) throw error;
+  }
 }
 
 export async function loadLocalReviewRun(): Promise<LocalReviewRunSnapshot | null> {
-  if (!canUseIndexedDb()) {
-    return null;
+  const recovery = readRecoverySnapshot();
+  if (!canUseIndexedDb()) return recovery;
+  try {
+    const result = await runStoreTransaction("readonly", (store) => store.get(LOCAL_OWNER_KEY)) as LocalReviewRunSnapshot | undefined;
+    return recovery && (!result || recovery.updatedAt >= result.updatedAt) ? recovery : result ?? null;
+  } catch {
+    return recovery;
   }
-
-  const result = await runStoreTransaction("readonly", (store) => store.get(LOCAL_OWNER_KEY));
-  return (result as LocalReviewRunSnapshot | undefined) ?? null;
 }

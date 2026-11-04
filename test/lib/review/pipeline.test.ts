@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculateReviewScoring } from "@/lib/review/scoring";
 import { runReviewPipeline } from "@/lib/review/pipeline";
 import type { ResumeDocument, ResumeProfile, ReviewStageEvent, ReviewerFeedback, TargetJob } from "@/lib/review/schemas";
-
-const scores = calculateReviewScoring({
-  hr_agent: { scoreBreakdown: Array.from({ length: 5 }, () => ({ score: 70, reason: "Evidence" })) },
-  interviewer_agent: { scoreBreakdown: Array.from({ length: 5 }, () => ({ score: 80, reason: "Evidence" })) },
-  career_master_agent: { scoreBreakdown: Array.from({ length: 5 }, () => ({ score: 60, reason: "Evidence" })) },
-});
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -80,7 +73,6 @@ test("runReviewPipeline runs stages in the expected order", async () => {
       events.push({ kind: event.kind, stage: event.stage });
     },
     {
-      runScoring: async () => scores,
       loadResume: async () => document,
       runResumeParser: async () => profile,
       reviewerAgents: [
@@ -120,8 +112,6 @@ test("runReviewPipeline runs stages in the expected order", async () => {
     { kind: "stage_completed", stage: "resume_loader" },
     { kind: "stage_started", stage: "resume_parser" },
     { kind: "stage_completed", stage: "resume_parser" },
-    { kind: "stage_started", stage: "scoring_agent" },
-    { kind: "stage_completed", stage: "scoring_agent" },
     { kind: "stage_started", stage: "hr_agent" },
     { kind: "stage_started", stage: "interviewer_agent" },
     { kind: "stage_started", stage: "career_master_agent" },
@@ -189,7 +179,6 @@ test("runReviewPipeline forwards streaming progress events from agents", async (
       events.push(event);
     },
     {
-      runScoring: async () => scores,
       loadResume: async () => document,
       runResumeParser: async (_document, onProgress) => {
         onProgress?.({
@@ -309,7 +298,6 @@ test("runReviewPipeline forwards abort signal to each agent executor", async () 
     { resumeFile, targetJob },
     undefined,
     {
-      runScoring: async () => scores,
       loadResume: async () => document,
       runResumeParser: async (_document, _onProgress, abortSignal) => {
         parserSignal = abortSignal;
@@ -404,7 +392,6 @@ test("runReviewPipeline forwards target job context to reviewer and summary agen
     { resumeFile, targetJob },
     undefined,
     {
-      runScoring: async () => scores,
       loadResume: async () => document,
       runResumeParser: async () => profile,
       reviewerAgents: [
@@ -509,7 +496,6 @@ test("runReviewPipeline resumes from completed stage payloads and only reruns mi
       events.push({ kind: event.kind, stage: event.stage, message: event.message });
     },
     {
-      runScoring: async () => scores,
       loadResume: async () => {
         throw new Error("loader should be skipped");
       },
@@ -548,7 +534,6 @@ test("runReviewPipeline resumes from completed stage payloads and only reruns mi
       resumeState: {
         document,
         profile,
-        scoring: scores,
         reviewerFeedback: {
           hr_agent: cachedHrFeedback,
         },

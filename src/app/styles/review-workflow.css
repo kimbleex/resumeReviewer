@@ -109,7 +109,7 @@
 
 .workflow-parser-container {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 3;
   position: relative;
   z-index: 2;
   display: flex;
@@ -1867,14 +1867,4 @@
   border-radius: 999px;
   background: rgba(16, 185, 129, 0.16);
   color: #34d399;
-}
-
-.workflow-scoring-container {
-  grid-column: 3;
-  grid-row: 3;
-  position: relative;
-  z-index: 2;
-  display: flex;
-  min-width: 0;
-  align-items: stretch;
 }

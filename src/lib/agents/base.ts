@@ -209,7 +209,6 @@ function startAgentRun(options: AgentRunOptions) {
   const startedAt = Date.now();
   const callLabel = options.callLabel ?? ({
     resume_parser: "事实提取",
-    scoring_agent: "三视角评分",
     hr_agent: "HR 建议",
     interviewer_agent: "面试官建议",
     career_master_agent: "职业定位建议",

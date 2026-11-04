@@ -1,5 +1,6 @@
 import { invokeStructuredAgent, dumpJson, type StructuredAgentProgress } from "@/lib/agents/base";
 import { buildSummaryPrompt, formatTargetJobContext } from "@/lib/agents/workflow/prompts";
+import { calculateSummaryScore } from "@/lib/review/scoring";
 import {
   summaryPrioritiesResponseSchema,
   summaryRevisionsResponseSchema,
@@ -15,11 +16,10 @@ export async function runSummaryAgent(
   targetJob?: TargetJob,
   onProgress?: (event: StructuredAgentProgress) => void,
   abortSignal?: AbortSignal,
-  scoring?: FinalResumeReview,
   checkpoint?: ReviewCallCheckpoint,
   onCheckpoint?: (checkpoint: ReviewCallCheckpoint) => void,
 ): Promise<FinalResumeReview> {
-  if (!scoring) throw new Error("请先完成三视角评分。");
+  const scoring = calculateSummaryScore(reviewerFeedback);
   const context = `${formatTargetJobContext(targetJob)}
 已确定的加权总分：${scoring.overallScore}。
 三位专家的短建议：${dumpJson(reviewerFeedback.map((feedback) => ({
