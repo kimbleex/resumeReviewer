@@ -4,6 +4,12 @@ node_modules/
 coverage/
 dist/
 *.tsbuildinfo
+*.log
+
+# OS metadata & local tools
+.DS_Store
+Thumbs.db
+.codegraph/
 
 # Local env
 .env

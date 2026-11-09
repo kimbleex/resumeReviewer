@@ -1,6 +1,6 @@
 services:
   app:
-    image: resume-reviewer:${APP_VERSION:-0.2.0}
+    image: resume-reviewer:${APP_VERSION:-0.2.1}
     build: .
     ports:
       - "${APP_PORT:-3000}:3000"

@@ -1,6 +1,8 @@
 node_modules
 .next
 .git
+.DS_Store
+.codegraph
 .env
 .env.*
 !.env.template
